@@ -1,0 +1,110 @@
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+  read_write:
+    - /tmp
+    - /dev/null
+    - /sandbox
+
+landlock:
+  compatibility: best_effort
+
+network_policies:
+
+  github_git:
+    name: github-git
+    endpoints:
+      - host: github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: "/jlaska/agent-sandbox-test.git/info/refs*"
+          - allow:
+              method: POST
+              path: "/jlaska/agent-sandbox-test.git/git-upload-pack"
+          - allow:
+              method: POST
+              path: "/jlaska/agent-sandbox-test.git/git-receive-pack"
+    binaries:
+      - { path: /usr/bin/git }
+      - { path: /usr/lib/git-core/git-remote-http }
+
+  github_api:
+    name: github-api
+    endpoints:
+      - host: api.github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: GET
+              path: "/repos/jlaska/agent-sandbox-test"
+          - allow:
+              method: GET
+              path: "/repos/jlaska/agent-sandbox-test/**"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/agent-sandbox-test/pulls"
+          - allow:
+              method: PATCH
+              path: "/repos/jlaska/agent-sandbox-test/pulls/*"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/agent-sandbox-test/issues/*/comments"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/agent-sandbox-test/pulls/*/reviews"
+          - allow:
+              method: DELETE
+              path: "/repos/jlaska/agent-sandbox-test/git/refs/**"
+          - allow:
+              method: GET
+              path: "/user"
+          - allow:
+              method: GET
+              path: "/user/**"
+          - allow:
+              method: GET
+              path: "/rate_limit"
+          - allow:
+              method: GET
+              path: "/app"
+    binaries:
+      - { path: /usr/bin/gh }
+      - { path: /usr/local/bin/gh }
+      - { path: /usr/bin/git }
+      - { path: /usr/lib/git-core/git-remote-http }
+
+  github_graphql:
+    name: github-graphql
+    endpoints:
+      - host: api.github.com
+        port: 443
+        path: "/graphql"
+        protocol: graphql
+        enforcement: enforce
+        rules:
+          - allow:
+              operation_type: query
+          - allow:
+              operation_type: mutation
+              fields: [createPullRequest, updatePullRequest, addComment, addPullRequestReview, submitPullRequestReview, requestReviews, closePullRequest, reopenPullRequest, markPullRequestReadyForReview, convertPullRequestToDraft]
+        deny_rules:
+          - operation_type: mutation
+            fields: [mergePullRequest, enablePullRequestAutoMerge]
+    binaries:
+      - { path: /usr/bin/gh }
+      - { path: /usr/local/bin/gh }
