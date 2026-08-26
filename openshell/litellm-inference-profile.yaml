@@ -1,0 +1,39 @@
+id: litellm-inference
+display_name: "LiteLLM Proxy (Homelab)"
+description: "LiteLLM proxy inference provider — routes to Vertex AI via homelab cluster. Used by Claude Code and Pi."
+category: inference
+credentials:
+  - name: litellm_api_key
+    description: LiteLLM API key (stored in macOS Keychain as litellm-api-key)
+    env_vars:
+      - LITELLM_API_KEY
+    required: true
+    auth_style: header
+    header_name: x-api-key
+    query_param: ""
+  - name: litellm_bearer_token
+    description: LiteLLM bearer token for custom header auth
+    env_vars:
+      - LITELLM_BEARER_TOKEN
+    required: false
+    auth_style: bearer
+    header_name: authorization
+    query_param: ""
+endpoints:
+  - host: litellm.internal.keener.us
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries:
+  - /usr/bin/claude
+  - /usr/local/bin/claude
+  - /usr/bin/node
+  - /usr/local/bin/node
+  - /usr/bin/pi
+  - /usr/local/bin/pi
+  - /usr/bin/python3
+  - /usr/local/bin/python3
+  - /usr/bin/curl
+  - /usr/local/bin/curl
+inference_capable: true
