@@ -1,0 +1,105 @@
+id: github-agent
+display_name: "GitHub Agent (Restricted)"
+description: "GitHub provider for autonomous agents — allows Git push, PR operations, and check inspection. Merge blocking enforced via sandbox policy."
+category: source_control
+credentials:
+  - name: api_token
+    description: GitHub App installation token
+    env_vars:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    query_param: ""
+endpoints:
+  # REST API
+  - host: api.github.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+      # Repository (read)
+      - allow:
+          method: GET
+          path: /repos/jlaska/agent-sandbox-test
+      - allow:
+          method: GET
+          path: /repos/jlaska/agent-sandbox-test/**
+
+      # Pull requests: create, update
+      - allow:
+          method: POST
+          path: /repos/jlaska/agent-sandbox-test/pulls
+      - allow:
+          method: PATCH
+          path: /repos/jlaska/agent-sandbox-test/pulls/*
+
+      # PR comments
+      - allow:
+          method: POST
+          path: /repos/jlaska/agent-sandbox-test/issues/*/comments
+
+      # PR reviews
+      - allow:
+          method: POST
+          path: /repos/jlaska/agent-sandbox-test/pulls/*/reviews
+
+      # User identity
+      - allow:
+          method: GET
+          path: /user
+      - allow:
+          method: GET
+          path: /user/**
+
+      # Rate limit
+      - allow:
+          method: GET
+          path: /rate_limit
+
+      # App identity
+      - allow:
+          method: GET
+          path: /app
+
+  # GraphQL API — read-only
+  - host: api.github.com
+    port: 443
+    protocol: graphql
+    access: read-only
+    enforcement: enforce
+    path: /graphql
+
+  # Git Smart HTTP
+  - host: github.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow:
+          method: GET
+          path: /**
+      - allow:
+          method: HEAD
+          path: /**
+      - allow:
+          method: OPTIONS
+          path: /**
+      - allow:
+          method: POST
+          path: /**/git-upload-pack
+      - allow:
+          method: POST
+          path: /jlaska/agent-sandbox-test.git/git-receive-pack
+      - allow:
+          method: POST
+          path: /jlaska/agent-sandbox-test/git-receive-pack
+
+binaries:
+  - /usr/bin/gh
+  - /usr/local/bin/gh
+  - /usr/bin/git
+  - /usr/local/bin/git
+  - /usr/lib/git-core/git-remote-http
+inference_capable: false
