@@ -108,3 +108,153 @@ network_policies:
     binaries:
       - { path: /usr/bin/gh }
       - { path: /usr/local/bin/gh }
+
+  litellm_inference:
+    name: litellm-inference
+    endpoints:
+      - host: litellm.internal.keener.us
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/pi }
+      - { path: /usr/local/bin/pi }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/local/bin/python3 }
+      - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/curl }
+
+  npm_registry:
+    name: npm-registry
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        allow_encoded_slash: true
+        rules:
+          - allow:
+              method: GET
+              path: "/**"
+    binaries:
+      - { path: /usr/bin/npm }
+      - { path: /usr/local/bin/npm }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+
+  vertex_ai:
+    name: vertex-ai
+    endpoints:
+      - host: global-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: us-central1-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: us-east5-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: europe-west1-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: oauth2.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/token"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+
+  anthropic_api:
+    name: anthropic-api
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+
+  claude_telemetry:
+    name: claude-telemetry
+    endpoints:
+      - host: statsig.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+      - host: sentry.io
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
