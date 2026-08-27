@@ -153,6 +153,87 @@ network_policies:
       - { path: /usr/bin/node }
       - { path: /usr/local/bin/node }
 
+  vertex_ai:
+    name: vertex-ai
+    endpoints:
+      - host: global-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: us-central1-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: us-east5-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: europe-west1-aiplatform.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+      - host: oauth2.googleapis.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/token"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+
+  anthropic_api:
+    name: anthropic-api
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: "/**"
+          - allow:
+              method: GET
+              path: "/**"
+    binaries:
+      - { path: /usr/bin/claude }
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+
   claude_telemetry:
     name: claude-telemetry
     endpoints:
