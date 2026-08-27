@@ -4,22 +4,52 @@
 
 Phase 5 validates that multiple coding agents can operate within the OpenShell sandbox while sharing the same GitHub security policy. Each agent independently authenticates to its inference provider through the LiteLLM proxy and passes the full GitHub acceptance matrix.
 
-## Architecture
-
-Both proven agents (Claude Code and Pi) route inference through the same LiteLLM proxy at `litellm.internal.keener.us`, which forwards requests to Vertex AI. The GitHub credential path is identical for all agents — the Phase 4 `github-agent` provider.
+## Usage
 
 ```
-agent-run <repo> <agent>
+agent-run <repo> <harness> [--provider <provider>] [--model <model>] [--max]
+```
+
+### Harness / provider / model matrix
+
+| Harness | litellm (default) | vertex | api |
+|---------|-------------------|--------|-----|
+| claude  | ✓ | ✓ | ✓ |
+| pi      | ✓ |   |   |
+| shell   | (none) | | |
+
+### Examples
+
+```bash
+agent-run jlaska/agent-sandbox-test claude                                    # litellm, default model
+agent-run jlaska/agent-sandbox-test claude --model claude-sonnet-4-20250514   # litellm, specific model
+agent-run jlaska/agent-sandbox-test claude --provider vertex                  # direct Vertex AI
+agent-run jlaska/agent-sandbox-test claude --provider vertex --model claude-sonnet-4-20250514
+agent-run jlaska/agent-sandbox-test claude --provider api                     # direct api.anthropic.com
+agent-run jlaska/agent-sandbox-test claude --provider litellm --max           # Max subscription billing
+agent-run jlaska/agent-sandbox-test pi                                        # litellm, default model
+agent-run jlaska/agent-sandbox-test pi --model go-mimo-v2.5                   # litellm, specific model
+agent-run jlaska/agent-sandbox-test shell                                     # no inference
+```
+
+`--model` is passed through to the harness CLI as `--model <value>`. When omitted, each harness uses its own default.
+
+## Architecture
+
+The launcher separates three concerns: harness (which agent binary), provider (where model calls go), and model (which model to request). The GitHub credential path is identical for all combinations — the Phase 4 `github-agent` provider.
+
+```
+agent-run <repo> <harness> [--provider <provider>] [--model <model>]
   │
   ├── GitHub provider (github-agent)
   │     └── credential: api_token (from minted installation token)
   │
-  ├── Inference provider (litellm-inference)
-  │     ├── credential: litellm_api_key
-  │     └── credential: litellm_bearer_token
+  ├── Inference provider (one of):
+  │     ├── litellm-inference  → litellm.internal.keener.us
+  │     ├── vertex-ai          → *-aiplatform.googleapis.com (gcloud ADC)
+  │     └── claude-code        → api.anthropic.com (builtin)
   │
-  └── Agent-specific provider (claude-code, for Claude only)
-        └── credential: api_key (satisfies OpenShell auto-detection)
+  └── Harness launch: <harness-cmd> [--model <model>]
 ```
 
 ## 5.1 Claude Code

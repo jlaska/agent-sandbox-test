@@ -2,7 +2,7 @@
 # agent-run — Trusted-host launcher for sandboxed agent sessions.
 #
 # Usage:
-#   agent-run <owner/repo> <harness> [--provider <provider>] [--max]
+#   agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]
 #   agent-run --diag
 #   agent-run --list-repos
 #
@@ -25,6 +25,7 @@
 #   shell    |         |        |      |  ✓
 #
 # Flags:
+#   --model   Override the default model (passed to the harness CLI)
 #   --max     Claude Max subscription via LiteLLM header forwarding
 #             (only valid with --provider litellm, which is the default)
 #
@@ -443,7 +444,7 @@ case "${1:-}" in
         ;;
     --help|-h|"")
         trap - EXIT
-        echo "Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--max]"
+        echo "Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]"
         echo ""
         echo "  Harnesses:  $SUPPORTED_HARNESSES"
         echo "  Providers:  litellm (default), vertex, api"
@@ -455,6 +456,7 @@ case "${1:-}" in
         echo "    shell:   none"
         echo ""
         echo "  --provider <p>  Select inference provider (default: litellm)"
+        echo "  --model <m>     Override model (passed to harness CLI as --model)"
         echo "  --max           Claude Max subscription via LiteLLM (litellm only)"
         echo "  --diag          Print diagnostic info"
         echo "  --list-repos    List approved repositories"
@@ -463,15 +465,17 @@ case "${1:-}" in
 esac
 
 # Parse arguments
-REPO="${1:?Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--max]}"
-HARNESS="${2:?Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--max]}"
+REPO="${1:?Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]}"
+HARNESS="${2:?Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]}"
 shift 2
 
 INFERENCE_PROVIDER=""
+MODEL_OVERRIDE=""
 USE_MAX="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --provider) INFERENCE_PROVIDER="${2:?--provider requires a value}"; shift 2 ;;
+        --model)    MODEL_OVERRIDE="${2:?--model requires a value}"; shift 2 ;;
         --max)      USE_MAX="true"; shift ;;
         *)          die "Unknown option: $1" ;;
     esac
@@ -491,6 +495,7 @@ SANDBOX_NAME="a-${HARNESS}-$(date +%s | tail -c 6)"
 log "Repository: $REPO"
 log "Harness:    $HARNESS"
 log "Provider:   $INFERENCE_PROVIDER"
+[[ -n "$MODEL_OVERRIDE" ]] && log "Model:      $MODEL_OVERRIDE"
 log "Sandbox:    $SANDBOX_NAME"
 [[ "$USE_MAX" == "true" ]] && log "Mode:       Max subscription (header forwarding)"
 
@@ -579,10 +584,19 @@ openshell sandbox exec -n "$SANDBOX_NAME" -- sh -c "
 
 # Step 11: Launch agent
 log "Launching harness: $HARNESS (provider: $INFERENCE_PROVIDER)"
+[[ -n "$MODEL_OVERRIDE" ]] && log "Model override: $MODEL_OVERRIDE"
 log "Working directory: /sandbox/repo"
 echo "---"
 
+HARNESS_ARGS=""
+if [[ -n "$MODEL_OVERRIDE" ]]; then
+    case "$HARNESS" in
+        claude) HARNESS_ARGS="--model $MODEL_OVERRIDE" ;;
+        pi)     HARNESS_ARGS="--model $MODEL_OVERRIDE" ;;
+    esac
+fi
+
 openshell sandbox exec -n "$SANDBOX_NAME" --workdir /sandbox/repo -- \
-    bash -c "source ~/.profile 2>/dev/null; export GH_TOKEN=\$api_token; exec $HARNESS_CMD" || true
+    bash -c "source ~/.profile 2>/dev/null; export GH_TOKEN=\$api_token; exec $HARNESS_CMD $HARNESS_ARGS" || true
 
 # Cleanup runs via trap
