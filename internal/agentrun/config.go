@@ -1,0 +1,202 @@
+package agentrun
+
+import (
+	"flag"
+	"fmt"
+	"strings"
+)
+
+// Supported harness types.
+const (
+	HarnessClaude = "claude"
+	HarnessPi     = "pi"
+	HarnessShell  = "shell"
+)
+
+// Supported inference providers.
+const (
+	ProviderLiteLLM = "litellm"
+	ProviderVertex  = "vertex"
+	ProviderAPI     = "api"
+	ProviderNone    = "none"
+)
+
+// Approved repositories.
+var ApprovedRepos = []string{
+	"jlaska/agent-sandbox-test",
+}
+
+// Config holds parsed command-line arguments and configuration.
+type Config struct {
+	// Positional arguments
+	Repo    string
+	Harness string
+
+	// Optional flags
+	Provider     string
+	Model        string
+	Max          bool
+	Diag         bool
+	ListRepos    bool
+	Help         bool
+}
+
+// harnessCommands maps harness names to their shell commands.
+var harnessCommands = map[string]string{
+	HarnessClaude: "claude",
+	HarnessPi:     "pi",
+	HarnessShell:  "bash",
+}
+
+// harnessDefaultProvider returns the default provider for a harness.
+func harnessDefaultProvider(harness string) string {
+	switch harness {
+	case HarnessClaude, HarnessPi:
+		return ProviderLiteLLM
+	case HarnessShell:
+		return ProviderNone
+	default:
+		return ""
+	}
+}
+
+// harnessSupportsProvider checks if a harness supports a provider.
+func harnessSupportsProvider(harness, provider string) bool {
+	compat := map[string][]string{
+		HarnessClaude: {ProviderLiteLLM, ProviderVertex, ProviderAPI},
+		HarnessPi:     {ProviderLiteLLM},
+		HarnessShell:  {ProviderNone},
+	}
+	supported, ok := compat[harness]
+	if !ok {
+		return false
+	}
+	for _, p := range supported {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseArgs parses command-line arguments into a Config.
+func ParseArgs(args []string) (*Config, error) {
+	cfg := &Config{}
+
+	fs := flag.NewFlagSet("agent-run", flag.ContinueOnError)
+	fs.StringVar(&cfg.Provider, "provider", "", "inference provider (litellm, vertex, api)")
+	fs.StringVar(&cfg.Model, "model", "", "override model name")
+	fs.BoolVar(&cfg.Max, "max", false, "use Claude Max subscription via LiteLLM")
+	fs.BoolVar(&cfg.Diag, "diag", false, "print diagnostic information")
+	fs.BoolVar(&cfg.ListRepos, "list-repos", false, "list approved repositories")
+	fs.BoolVar(&cfg.Help, "help", false, "print usage")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	cfg.Help = cfg.Help || fs.NArg() == 0
+
+	if cfg.Help {
+		printUsage()
+		return cfg, nil
+	}
+
+	if cfg.ListRepos {
+		printRepos()
+		return cfg, nil
+	}
+
+	if fs.NArg() < 2 {
+		return nil, fmt.Errorf("usage: agent-run <owner/repo> <harness> [options]")
+	}
+
+	cfg.Repo = fs.Arg(0)
+	cfg.Harness = fs.Arg(1)
+
+	return cfg, nil
+}
+
+// Validate checks the configuration for validity.
+func (c *Config) Validate() error {
+	if c.Repo == "" {
+		return fmt.Errorf("repository is required")
+	}
+
+	if c.Harness == "" {
+		return fmt.Errorf("harness is required")
+	}
+
+	// Validate harness
+	switch c.Harness {
+	case HarnessClaude, HarnessPi, HarnessShell:
+		// valid
+	default:
+		return fmt.Errorf("unknown harness %q; supported: %s", c.Harness, strings.Join([]string{HarnessClaude, HarnessPi, HarnessShell}, ", "))
+	}
+
+	// Set default provider if not specified
+	if c.Provider == "" {
+		c.Provider = harnessDefaultProvider(c.Harness)
+	}
+
+	// Validate provider
+	switch c.Provider {
+	case ProviderLiteLLM, ProviderVertex, ProviderAPI, ProviderNone:
+		// valid
+	default:
+		return fmt.Errorf("unknown provider %q; supported: %s", c.Provider, strings.Join([]string{ProviderLiteLLM, ProviderVertex, ProviderAPI, ProviderNone}, ", "))
+	}
+
+	// Check harness/provider compatibility
+	if !harnessSupportsProvider(c.Harness, c.Provider) {
+		return fmt.Errorf("harness %q does not support provider %q", c.Harness, c.Provider)
+	}
+
+	// Check approved repos
+	if !isApprovedRepo(c.Repo) {
+		return fmt.Errorf("repository %q is not in the approved list; use --list-repos to see available repos", c.Repo)
+	}
+
+	// Validate --max flag
+	if c.Max && c.Provider != ProviderLiteLLM {
+		return fmt.Errorf("--max is only valid with --provider litellm")
+	}
+
+	return nil
+}
+
+func isApprovedRepo(repo string) bool {
+	for _, approved := range ApprovedRepos {
+		if repo == approved {
+			return true
+		}
+	}
+	return false
+}
+
+func printUsage() {
+	fmt.Println("Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]")
+	fmt.Println()
+	fmt.Printf("  Harnesses:  %s, %s, %s\n", HarnessClaude, HarnessPi, HarnessShell)
+	fmt.Printf("  Providers:  %s (default), %s, %s\n", ProviderLiteLLM, ProviderVertex, ProviderAPI)
+	fmt.Println("  Repos:     ", strings.Join(ApprovedRepos, ", "))
+	fmt.Println()
+	fmt.Println("  Harness/provider compatibility:")
+	fmt.Println("    claude:  litellm (default), vertex, api")
+	fmt.Println("    pi:      litellm (default)")
+	fmt.Println("    shell:   none")
+	fmt.Println()
+	fmt.Println("  --provider <p>  Select inference provider (default: litellm)")
+	fmt.Println("  --model <m>     Override model (passed to harness CLI as --model)")
+	fmt.Println("  --max           Claude Max subscription via LiteLLM (litellm only)")
+	fmt.Println("  --diag          Print diagnostic info")
+	fmt.Println("  --list-repos    List approved repositories")
+}
+
+func printRepos() {
+	fmt.Println("Approved repositories:")
+	for _, repo := range ApprovedRepos {
+		fmt.Printf("  %s\n", repo)
+	}
+}
