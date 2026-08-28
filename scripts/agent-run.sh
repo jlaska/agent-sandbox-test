@@ -91,7 +91,7 @@ harness_supports_provider() {
     case "${harness}:${provider}" in
         claude:litellm|claude:vertex|claude:api) return 0 ;;
         pi:litellm)                              return 0 ;;
-        shell:none)                              return 0 ;;
+        shell:none|shell:litellm)                 return 0 ;;
         *)                                       return 1 ;;
     esac
 }
@@ -111,7 +111,10 @@ MINTED_TOKEN=""
 PROVIDERS_CREATED=()
 POLICY_TMP=""
 
+CLEANED_UP=false
 cleanup() {
+    [[ "$CLEANED_UP" == "true" ]] && return
+    CLEANED_UP=true
     local exit_code=$?
     echo ""
     echo "--- Cleanup ---"
@@ -137,7 +140,7 @@ cleanup() {
     echo "  Cleanup complete."
     exit "$exit_code"
 }
-trap cleanup EXIT INT TERM HUP
+trap cleanup EXIT
 
 # --- Helpers ---
 log()  { echo "[agent-run] $*"; }
@@ -243,22 +246,23 @@ setup_provider_litellm() {
         --name litellm-inference \
         --type litellm-inference \
         --credential "litellm_api_key=${api_key}" \
+        --credential "litellm_api_key_bearer=${api_key}" \
         --credential "litellm_bearer_token=${bearer_token:-unused}" \
         >/dev/null 2>&1 || die "Failed to create litellm-inference provider."
     PROVIDERS_CREATED+=("litellm-inference")
     PROVIDER_FLAGS="$PROVIDER_FLAGS --provider litellm-inference"
 
-    # Claude Code also requires the builtin claude-code provider (binary auto-detection)
-    if [[ "$harness" == "claude" ]]; then
-        openshell provider delete claude-code 2>/dev/null || true
-        openshell provider create \
-            --name claude-code \
-            --type claude-code \
-            --credential "api_key=${api_key}" \
-            >/dev/null 2>&1 || die "Failed to create claude-code provider."
-        PROVIDERS_CREATED+=("claude-code")
-        PROVIDER_FLAGS="$PROVIDER_FLAGS --provider claude-code"
-    fi
+    # The claude-code provider handles Anthropic API credential injection
+    # (x-api-key header). Required for any harness that sends Anthropic-style
+    # requests through the LiteLLM proxy (Claude Code, Pi, etc.).
+    openshell provider delete claude-code 2>/dev/null || true
+    openshell provider create \
+        --name claude-code \
+        --type claude-code \
+        --credential "api_key=${api_key}" \
+        >/dev/null 2>&1 || die "Failed to create claude-code provider."
+    PROVIDERS_CREATED+=("claude-code")
+    PROVIDER_FLAGS="$PROVIDER_FLAGS --provider claude-code"
 
     # Env flags
     case "$harness" in
@@ -295,10 +299,13 @@ setup_sandbox_litellm() {
             log "  ANTHROPIC_API_KEY mapped to litellm_api_key placeholder."
             ;;
         pi)
+            # LITELLM_API_KEY → litellm_api_key_bearer placeholder
+            # Gateway resolves in Authorization: Bearer header for pi-provider-litellm
             openshell sandbox exec -n "$SANDBOX_NAME" -- sh -c '
-                echo "export LITELLM_API_KEY=\"\$litellm_api_key\"" >> ~/.bashrc
-                echo "export LITELLM_API_KEY=\"\$litellm_api_key\"" >> ~/.profile
+                echo "export LITELLM_API_KEY=\"\$litellm_api_key_bearer\"" >> ~/.bashrc
+                echo "export LITELLM_API_KEY=\"\$litellm_api_key_bearer\"" >> ~/.profile
             ' >/dev/null 2>&1
+            log "  Pi configured: LITELLM_API_KEY (Bearer) + LITELLM_BASE_URL."
             ;;
     esac
 }
@@ -416,7 +423,7 @@ install_harness() {
     local harness="$1"
     case "$harness" in
         pi)
-            log "Installing Pi in sandbox..."
+            log "Installing Pi + LiteLLM provider in sandbox..."
             openshell sandbox exec -n "$SANDBOX_NAME" -- sh -c '
                 mkdir -p /sandbox/.npm-global
                 npm config set prefix /sandbox/.npm-global
@@ -426,6 +433,11 @@ install_harness() {
                 echo "export PATH=\"/sandbox/.npm-global/bin:\$PATH\"" >> ~/.bashrc
                 echo "export PATH=\"/sandbox/.npm-global/bin:\$PATH\"" >> ~/.profile
             ' >/dev/null 2>&1
+            # Install pi-provider-litellm extension
+            openshell sandbox exec -n "$SANDBOX_NAME" -- sh -c '
+                export PATH="/sandbox/.npm-global/bin:$PATH"
+                pi install npm:pi-provider-litellm
+            ' 2>&1 | tail -3 || log "  WARNING: pi-provider-litellm install may have failed."
             ;;
     esac
 }
@@ -596,7 +608,10 @@ if [[ -n "$MODEL_OVERRIDE" ]]; then
     esac
 fi
 
-openshell sandbox exec -n "$SANDBOX_NAME" --workdir /sandbox/repo -- \
-    bash -c "source ~/.profile 2>/dev/null; export GH_TOKEN=\$api_token; exec $HARNESS_CMD $HARNESS_ARGS" || true
+set +e
+openshell sandbox exec -n "$SANDBOX_NAME" --workdir /sandbox/repo --tty -- \
+    bash -c "source ~/.profile 2>/dev/null; export GH_TOKEN=\$api_token; exec $HARNESS_CMD $HARNESS_ARGS"
+HARNESS_EXIT=$?
+set -e
 
 # Cleanup runs via trap

@@ -4,20 +4,28 @@ description: "LiteLLM proxy inference provider — routes to Vertex AI via homel
 category: inference
 credentials:
   - name: litellm_api_key
-    description: LiteLLM API key (stored in macOS Keychain as litellm-api-key)
+    description: LiteLLM API key injected as x-api-key header (Claude Code)
     env_vars:
       - LITELLM_API_KEY
     required: true
     auth_style: header
     header_name: x-api-key
     query_param: ""
-  - name: litellm_bearer_token
-    description: LiteLLM bearer token for custom header auth
+  - name: litellm_api_key_bearer
+    description: LiteLLM API key injected as Authorization Bearer (Pi)
     env_vars:
-      - LITELLM_BEARER_TOKEN
+      - LITELLM_API_KEY_BEARER
     required: false
     auth_style: bearer
     header_name: authorization
+    query_param: ""
+  - name: litellm_bearer_token
+    description: LiteLLM bearer token for Max subscription header forwarding
+    env_vars:
+      - LITELLM_BEARER_TOKEN
+    required: false
+    auth_style: header
+    header_name: x-litellm-api-key
     query_param: ""
 endpoints:
   - host: litellm.internal.keener.us
