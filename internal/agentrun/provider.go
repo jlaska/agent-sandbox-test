@@ -3,6 +3,7 @@ package agentrun
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -62,11 +63,16 @@ func resolveInferenceEnv(harness string, explicitEnv []string) []string {
 	return envFlags
 }
 
-// createInferenceProviders creates the minimal OpenShell providers needed for
-// the harness. Returns provider names for cleanup tracking.
+// createInferenceProviders creates the OpenShell providers needed for the
+// harness to reach its inference endpoint. Returns provider flags for sandbox
+// creation and provider names for cleanup tracking.
 func createInferenceProviders(harness string) (providerFlags []string, providerNames []string, err error) {
+	var flags []string
+	var names []string
+
 	switch harness {
 	case HarnessClaude:
+		// Claude Code requires the built-in claude-code provider type.
 		name := "claude-code"
 		_ = execCmdSilent("openshell", "provider", "delete", name)
 		if err := execCmd("openshell", "provider", "create",
@@ -76,9 +82,41 @@ func createInferenceProviders(harness string) (providerFlags []string, providerN
 		); err != nil {
 			return nil, nil, fmt.Errorf("failed to create claude-code provider: %w", err)
 		}
-		return []string{"--provider", name}, []string{name}, nil
+		flags = append(flags, "--provider", name)
+		names = append(names, name)
 
-	default:
-		return nil, nil, nil
+	case HarnessPi:
+		// Pi needs the litellm-inference provider for network access.
+		if err := ensureLiteLLMProvider(); err != nil {
+			return nil, nil, err
+		}
+		name := "litellm-inference"
+		_ = execCmdSilent("openshell", "provider", "delete", name)
+		if err := execCmd("openshell", "provider", "create",
+			"--name", name,
+			"--type", "litellm-inference",
+			"--credential", "litellm_api_key=placeholder", //nolint:gosec // gitleaks:allow
+			"--credential", "litellm_bearer_token=placeholder", //nolint:gosec // gitleaks:allow
+		); err != nil {
+			return nil, nil, fmt.Errorf("failed to create litellm-inference provider: %w", err)
+		}
+		flags = append(flags, "--provider", name)
+		names = append(names, name)
 	}
+
+	return flags, names, nil
+}
+
+// ensureLiteLLMProvider imports the litellm-inference profile if not present.
+func ensureLiteLLMProvider() error {
+	out, _ := execCmdOutput("openshell", "provider", "list-profiles")
+	if strings.Contains(out, "litellm-inference") {
+		return nil
+	}
+	repoRoot := findRepoRoot()
+	profilePath := filepath.Join(repoRoot, "openshell", "litellm-inference-profile.yaml")
+	if err := execCmd("openshell", "provider", "profile", "import", "--file", profilePath); err != nil {
+		return fmt.Errorf("failed to import litellm-inference provider profile: %w", err)
+	}
+	return nil
 }

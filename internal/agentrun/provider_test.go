@@ -7,8 +7,9 @@ import (
 
 // mockCmd records calls and returns a configurable error.
 type mockCmd struct {
-	calls [][]string
-	err   error
+	calls      [][]string
+	err        error
+	execOutput func(string, ...string) (string, error)
 }
 
 func (m *mockCmd) exec(name string, args ...string) error {
@@ -16,8 +17,11 @@ func (m *mockCmd) exec(name string, args ...string) error {
 	return m.err
 }
 
-func (m *mockCmd) execOutput(name string, args ...string) (string, error) {
+func (m *mockCmd) defaultExecOutput(name string, args ...string) (string, error) {
 	m.calls = append(m.calls, append([]string{name}, args...))
+	if m.execOutput != nil {
+		return m.execOutput(name, args...)
+	}
 	return "", m.err
 }
 
@@ -35,7 +39,7 @@ func withMockExec(t *testing.T, fn func(mock *mockCmd)) {
 	m := &mockCmd{}
 	execCmdFn = m.exec
 	execCmdSilentFn = m.exec
-	execCmdOutputFn = m.execOutput
+	execCmdOutputFn = m.defaultExecOutput
 	fn(m)
 }
 
@@ -152,17 +156,25 @@ func TestCreateInferenceProviders(t *testing.T) {
 		})
 	})
 
-	t.Run("pi creates no providers", func(t *testing.T) {
+	t.Run("pi creates litellm-inference provider", func(t *testing.T) {
 		withMockExec(t, func(mock *mockCmd) {
+			mock.execOutput = func(name string, args ...string) (string, error) {
+				if name == "openshell" && len(args) > 0 && args[0] == "provider" {
+					return "litellm-inference\n", nil
+				}
+				return "", nil
+			}
+			execCmdOutputFn = mock.execOutput
+
 			flags, names, err := createInferenceProviders(HarnessPi)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(names) != 0 {
-				t.Errorf("expected no providers for pi, got %v", names)
+			if len(names) != 1 || names[0] != "litellm-inference" {
+				t.Errorf("names = %v, want [litellm-inference]", names)
 			}
-			if len(flags) != 0 {
-				t.Errorf("expected no flags for pi, got %v", flags)
+			if len(flags) != 2 || flags[0] != "--provider" || flags[1] != "litellm-inference" {
+				t.Errorf("flags = %v, want [--provider litellm-inference]", flags)
 			}
 		})
 	})
