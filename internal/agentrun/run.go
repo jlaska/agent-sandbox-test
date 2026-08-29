@@ -52,19 +52,19 @@ func Run(cfg *Config) error {
 		fmt.Println("--- Cleanup ---")
 		if sandboxName != "" {
 			fmt.Printf("  Deleting sandbox: %s ... ", sandboxName)
-			_ = execCmdSilent("openshell", "sandbox", "delete", sandboxName)
+			execCmdSilent("openshell", "sandbox", "delete", sandboxName)
 			fmt.Println("done")
 		}
 		if mintedToken != "" {
 			fmt.Print("  Revoking installation token ... ")
 			mintScript := filepath.Join(scriptDir, "mint-token.sh")
-			_ = execCmdSilent(mintScript, "--revoke", mintedToken)
+			execCmdSilent(mintScript, "--revoke", mintedToken)
 			mintedToken = ""
 			fmt.Println("done")
 		}
 		for _, prov := range providersCreated {
 			fmt.Printf("  Deleting provider: %s ... ", prov)
-			_ = execCmdSilent("openshell", "provider", "delete", prov)
+			execCmdSilent("openshell", "provider", "delete", prov)
 			fmt.Println("done")
 		}
 		fmt.Println("  Cleanup complete.")
@@ -212,7 +212,7 @@ func Run(cfg *Config) error {
 	}
 
 	launchCmd := fmt.Sprintf("source ~/.profile 2>/dev/null; export GH_TOKEN=$api_token; exec %s %s", harnessCmd, harnessArgs)
-	_ = execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--tty", "--",
+	execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--tty", "--",
 		"bash", "-c", launchCmd)
 
 	fmt.Println("\n[agent-run] Harness exited. Cleaning up...")
