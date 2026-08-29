@@ -115,7 +115,7 @@ When ready to extend to homelab, follow these steps:
 1. **Add homelab to App installation** (GitHub UI — USER ACTION)
 2. **Apply rulesets** to homelab matching the agent-sandbox-test configuration
 3. **Verify Renovate** and existing automation still works
-4. **Add to allowlist**: append `"jlaska/homelab"` to `APPROVED_REPOS` in `agent-run.sh`
+4. **Add to allowlist**: append `"jlaska/homelab"` to `ApprovedRepos` in `internal/agentrun/config.go`
 5. **Run exit gate**: `bash tests/phase6-exit-gate.sh --repo jlaska/homelab`
 6. **Inspect homelab conventions** (Argo CD, Helm, Kustomize, pre-commit) and
    adapt the sandbox policy if additional network endpoints are needed (e.g.,

@@ -230,9 +230,10 @@ func TestIsApprovedRepo(t *testing.T) {
 		want bool
 	}{
 		{"jlaska/agent-sandbox-test", true},
-		{"jlaska/homelab", true},
+		{"jlaska/homelab", false},
 		{"unknown/repo", false},
 		{"", false},
+		{"jlaska/agent-sandbox-denied", false},
 	}
 
 	for _, tt := range tests {
@@ -240,6 +241,31 @@ func TestIsApprovedRepo(t *testing.T) {
 			got := isApprovedRepo(tt.repo)
 			if got != tt.want {
 				t.Errorf("isApprovedRepo(%v) = %v, want %v", tt.repo, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateMalformedRepos(t *testing.T) {
+	malformed := []string{
+		"../traversal",
+		"owner/../other",
+		"-invalid/repo",
+		"owner//repo",
+		"",
+		"noslash",
+	}
+
+	for _, repo := range malformed {
+		t.Run(repo, func(t *testing.T) {
+			cfg := &Config{
+				Repo:     repo,
+				Harness:  "claude",
+				Provider: "litellm",
+			}
+			err := cfg.Validate()
+			if err == nil {
+				t.Errorf("Validate() should reject malformed repo %q", repo)
 			}
 		})
 	}

@@ -1,0 +1,339 @@
+package agentrun
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testRSAKey(t *testing.T) (*rsa.PrivateKey, []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	return key, keyPEM
+}
+
+func TestGenerateAppJWT(t *testing.T) {
+	_, keyPEM := testRSAKey(t)
+
+	t.Run("valid JWT", func(t *testing.T) {
+		jwt, err := generateAppJWT("12345", keyPEM)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		parts := strings.Split(jwt, ".")
+		if len(parts) != 3 {
+			t.Fatalf("JWT should have 3 parts, got %d", len(parts))
+		}
+		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			t.Error("JWT contains empty parts")
+		}
+	})
+
+	t.Run("invalid PEM", func(t *testing.T) {
+		_, err := generateAppJWT("12345", []byte("not a pem key"))
+		if err == nil {
+			t.Error("expected error for invalid PEM")
+		}
+	})
+
+	t.Run("empty key", func(t *testing.T) {
+		_, err := generateAppJWT("12345", []byte{})
+		if err == nil {
+			t.Error("expected error for empty key")
+		}
+	})
+
+	t.Run("PKCS8 key", func(t *testing.T) {
+		key, _ := rsa.GenerateKey(rand.Reader, 2048)
+		pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkcs8PEM := pem.EncodeToMemory(&pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: pkcs8Bytes,
+		})
+		jwt, err := generateAppJWT("12345", pkcs8PEM)
+		if err != nil {
+			t.Fatalf("PKCS8 key should work: %v", err)
+		}
+		if jwt == "" {
+			t.Error("JWT should not be empty")
+		}
+	})
+}
+
+func TestIsHexEncoded(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"", false},
+		{"abcdef0123456789", true},
+		{"ABCDEF0123456789", true},
+		{"-----BEGIN RSA PRIVATE KEY-----", false},
+		{"ghijkl", false},
+		{"abc def", false},
+		{"abc\ndef", false},
+	}
+	for _, tt := range tests {
+		got := isHexEncoded(tt.input)
+		if got != tt.want {
+			t.Errorf("isHexEncoded(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestGetAppPrivateKey(t *testing.T) {
+	origOutput := execCmdOutputFn
+	defer func() { execCmdOutputFn = origOutput }()
+
+	t.Run("normal PEM key", func(t *testing.T) {
+		_, keyPEM := testRSAKey(t)
+		execCmdOutputFn = func(name string, args ...string) (string, error) {
+			return string(keyPEM), nil
+		}
+		result, err := getAppPrivateKey()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(string(result), "BEGIN RSA PRIVATE KEY") {
+			t.Error("expected PEM key in result")
+		}
+	})
+
+	t.Run("hex-encoded PEM key", func(t *testing.T) {
+		_, keyPEM := testRSAKey(t)
+		hexKey := hex.EncodeToString(keyPEM)
+		execCmdOutputFn = func(name string, args ...string) (string, error) {
+			return hexKey, nil
+		}
+		result, err := getAppPrivateKey()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(string(result), "BEGIN RSA PRIVATE KEY") {
+			t.Error("expected PEM key after hex decode")
+		}
+	})
+
+	t.Run("keychain error", func(t *testing.T) {
+		execCmdOutputFn = func(name string, args ...string) (string, error) {
+			return "", fmt.Errorf("not found")
+		}
+		_, err := getAppPrivateKey()
+		if err == nil {
+			t.Error("expected error for keychain failure")
+		}
+	})
+
+	t.Run("empty keychain value", func(t *testing.T) {
+		execCmdOutputFn = func(name string, args ...string) (string, error) {
+			return "", nil
+		}
+		_, err := getAppPrivateKey()
+		if err == nil {
+			t.Error("expected error for empty keychain value")
+		}
+	})
+}
+
+func TestMintInstallationToken(t *testing.T) {
+	origHTTP := httpDo
+	origBase := githubAPIBase
+	defer func() {
+		httpDo = origHTTP
+		githubAPIBase = origBase
+	}()
+
+	t.Run("successful mint", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			if req.Method != "POST" {
+				t.Errorf("expected POST, got %s", req.Method)
+			}
+			if !strings.Contains(req.URL.Path, "/access_tokens") {
+				t.Errorf("unexpected path: %s", req.URL.Path)
+			}
+			if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer ") {
+				t.Error("missing Bearer authorization")
+			}
+
+			body, _ := io.ReadAll(req.Body)
+			var reqBody map[string]interface{}
+			if err := json.Unmarshal(body, &reqBody); err != nil {
+				t.Fatalf("failed to parse request body: %v", err)
+			}
+			repos, ok := reqBody["repositories"].([]interface{})
+			if !ok || len(repos) != 1 || repos[0] != "my-repo" {
+				t.Errorf("expected repositories=[my-repo], got %v", reqBody["repositories"])
+			}
+
+			resp := `{"token":"ghs_test123","expires_at":"2025-01-01T00:00:00Z","repositories":[{"full_name":"owner/my-repo"}]}`
+			return &http.Response{
+				StatusCode: 201,
+				Body:       io.NopCloser(strings.NewReader(resp)),
+			}, nil
+		}
+
+		result, err := mintInstallationToken("test-jwt", "12345", "owner", "my-repo")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Token != "ghs_test123" {
+			t.Errorf("token = %q, want ghs_test123", result.Token)
+		}
+	})
+
+	t.Run("API error", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 401,
+				Body:       io.NopCloser(strings.NewReader(`{"message":"Bad credentials"}`)),
+			}, nil
+		}
+
+		_, err := mintInstallationToken("bad-jwt", "12345", "owner", "repo")
+		if err == nil {
+			t.Error("expected error for 401 response")
+		}
+		if !strings.Contains(err.Error(), "401") {
+			t.Errorf("error should mention status code: %v", err)
+		}
+	})
+
+	t.Run("wrong repo in response", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			resp := `{"token":"ghs_test","expires_at":"2025-01-01T00:00:00Z","repositories":[{"full_name":"owner/other-repo"}]}`
+			return &http.Response{
+				StatusCode: 201,
+				Body:       io.NopCloser(strings.NewReader(resp)),
+			}, nil
+		}
+
+		_, err := mintInstallationToken("jwt", "12345", "owner", "my-repo")
+		if err == nil {
+			t.Error("expected error for wrong repo in response")
+		}
+		if !strings.Contains(err.Error(), "unexpected repository") {
+			t.Errorf("error should mention unexpected repository: %v", err)
+		}
+	})
+
+	t.Run("empty token in response", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 201,
+				Body:       io.NopCloser(strings.NewReader(`{"token":"","expires_at":"2025-01-01T00:00:00Z"}`)),
+			}, nil
+		}
+
+		_, err := mintInstallationToken("jwt", "12345", "owner", "repo")
+		if err == nil {
+			t.Error("expected error for empty token")
+		}
+	})
+}
+
+func TestRevokeToken(t *testing.T) {
+	origHTTP := httpDo
+	defer func() { httpDo = origHTTP }()
+
+	t.Run("successful revocation", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			if req.Method != "DELETE" {
+				t.Errorf("expected DELETE, got %s", req.Method)
+			}
+			if !strings.Contains(req.URL.Path, "/installation/token") {
+				t.Errorf("unexpected path: %s", req.URL.Path)
+			}
+			return &http.Response{
+				StatusCode: 204,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}
+
+		err := RevokeToken("ghs_test123")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("revocation failure", func(t *testing.T) {
+		httpDo = func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 401,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}
+
+		err := RevokeToken("bad-token")
+		if err == nil {
+			t.Error("expected error for failed revocation")
+		}
+	})
+}
+
+func TestMintTokenIntegration(t *testing.T) {
+	origHTTP := httpDo
+	origOutput := execCmdOutputFn
+	origTime := timeNow
+	defer func() {
+		httpDo = origHTTP
+		execCmdOutputFn = origOutput
+		timeNow = origTime
+	}()
+
+	_, keyPEM := testRSAKey(t)
+
+	execCmdOutputFn = func(name string, args ...string) (string, error) {
+		if name == "security" {
+			return string(keyPEM), nil
+		}
+		return "", nil
+	}
+
+	timeNow = func() time.Time {
+		return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+
+	httpDo = func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		var reqBody map[string]interface{}
+		_ = json.Unmarshal(body, &reqBody)
+
+		repos := reqBody["repositories"].([]interface{})
+		if len(repos) != 1 || repos[0] != "agent-sandbox-test" {
+			t.Errorf("expected repos=[agent-sandbox-test], got %v", repos)
+		}
+
+		resp := `{"token":"ghs_scoped","expires_at":"2025-01-01T01:00:00Z","repositories":[{"full_name":"jlaska/agent-sandbox-test"}]}`
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}
+
+	result, err := MintToken("jlaska/agent-sandbox-test")
+	if err != nil {
+		t.Fatalf("MintToken() error: %v", err)
+	}
+	if result.Token != "ghs_scoped" {
+		t.Errorf("token = %q, want ghs_scoped", result.Token)
+	}
+}

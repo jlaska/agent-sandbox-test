@@ -30,22 +30,13 @@ network_policies:
         rules:
           - allow:
               method: GET
-              path: "/jlaska/agent-sandbox-test.git/info/refs*"
+              path: "/{{.Owner}}/{{.Repo}}.git/info/refs*"
           - allow:
               method: POST
-              path: "/jlaska/agent-sandbox-test.git/git-upload-pack"
+              path: "/{{.Owner}}/{{.Repo}}.git/git-upload-pack"
           - allow:
               method: POST
-              path: "/jlaska/agent-sandbox-test.git/git-receive-pack"
-          - allow:
-              method: GET
-              path: "/jlaska/homelab.git/info/refs*"
-          - allow:
-              method: POST
-              path: "/jlaska/homelab.git/git-upload-pack"
-          - allow:
-              method: POST
-              path: "/jlaska/homelab.git/git-receive-pack"
+              path: "/{{.Owner}}/{{.Repo}}.git/git-receive-pack"
     binaries:
       - { path: /usr/bin/git }
       - { path: /usr/lib/git-core/git-remote-http }
@@ -60,46 +51,25 @@ network_policies:
         rules:
           - allow:
               method: GET
-              path: "/repos/jlaska/agent-sandbox-test"
+              path: "/repos/{{.Owner}}/{{.Repo}}"
           - allow:
               method: GET
-              path: "/repos/jlaska/agent-sandbox-test/**"
+              path: "/repos/{{.Owner}}/{{.Repo}}/**"
           - allow:
               method: POST
-              path: "/repos/jlaska/agent-sandbox-test/pulls"
+              path: "/repos/{{.Owner}}/{{.Repo}}/pulls"
           - allow:
               method: PATCH
-              path: "/repos/jlaska/agent-sandbox-test/pulls/*"
+              path: "/repos/{{.Owner}}/{{.Repo}}/pulls/*"
           - allow:
               method: POST
-              path: "/repos/jlaska/agent-sandbox-test/issues/*/comments"
+              path: "/repos/{{.Owner}}/{{.Repo}}/issues/*/comments"
           - allow:
               method: POST
-              path: "/repos/jlaska/agent-sandbox-test/pulls/*/reviews"
+              path: "/repos/{{.Owner}}/{{.Repo}}/pulls/*/reviews"
           - allow:
               method: DELETE
-              path: "/repos/jlaska/agent-sandbox-test/git/refs/**"
-          - allow:
-              method: GET
-              path: "/repos/jlaska/homelab"
-          - allow:
-              method: GET
-              path: "/repos/jlaska/homelab/**"
-          - allow:
-              method: POST
-              path: "/repos/jlaska/homelab/pulls"
-          - allow:
-              method: PATCH
-              path: "/repos/jlaska/homelab/pulls/*"
-          - allow:
-              method: POST
-              path: "/repos/jlaska/homelab/issues/*/comments"
-          - allow:
-              method: POST
-              path: "/repos/jlaska/homelab/pulls/*/reviews"
-          - allow:
-              method: DELETE
-              path: "/repos/jlaska/homelab/git/refs/**"
+              path: "/repos/{{.Owner}}/{{.Repo}}/git/refs/**"
           - allow:
               method: GET
               path: "/user"

@@ -29,16 +29,26 @@ func Run(cfg *Config) error {
 		return printDiagnostics()
 	}
 
+	if cfg.RevokeToken != "" {
+		return RevokeToken(cfg.RevokeToken)
+	}
+
+	if cfg.MintToken {
+		result, err := MintToken(cfg.Repo)
+		if err != nil {
+			return err
+		}
+		fmt.Print(result.Token)
+		return nil
+	}
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
-	// Find script directory for helper scripts
-	scriptDir, err := findScriptDir()
-	if err != nil {
-		return fmt.Errorf("failed to find script directory: %w", err)
-	}
+	// Find repo root for templates/profiles
+	repoRoot := findRepoRoot()
 
 	// State for cleanup
 	var (
@@ -52,19 +62,21 @@ func Run(cfg *Config) error {
 		fmt.Println("--- Cleanup ---")
 		if sandboxName != "" {
 			fmt.Printf("  Deleting sandbox: %s ... ", sandboxName)
-			execCmdSilent("openshell", "sandbox", "delete", sandboxName)
+			_ = execCmdSilent("openshell", "sandbox", "delete", sandboxName)
 			fmt.Println("done")
 		}
 		if mintedToken != "" {
 			fmt.Print("  Revoking installation token ... ")
-			mintScript := filepath.Join(scriptDir, "mint-token.sh")
-			execCmdSilent(mintScript, "--revoke", mintedToken)
+			if err := RevokeToken(mintedToken); err != nil {
+				fmt.Printf("warning: %v\n", err)
+			} else {
+				fmt.Println("done")
+			}
 			mintedToken = ""
-			fmt.Println("done")
 		}
 		for _, prov := range providersCreated {
 			fmt.Printf("  Deleting provider: %s ... ", prov)
-			execCmdSilent("openshell", "provider", "delete", prov)
+			_ = execCmdSilent("openshell", "provider", "delete", prov)
 			fmt.Println("done")
 		}
 		fmt.Println("  Cleanup complete.")
@@ -92,15 +104,14 @@ func Run(cfg *Config) error {
 		return fmt.Errorf("OpenShell gateway is not running")
 	}
 
-	// Step 2: Mint GitHub installation token
-	fmt.Println("[agent-run] Minting installation token...")
-	mintScript := filepath.Join(scriptDir, "mint-token.sh")
-	output, err := execCmdOutput(mintScript, "--token-only")
+	// Step 2: Mint repository-scoped GitHub installation token
+	fmt.Printf("[agent-run] Minting installation token (scoped to %s)...\n", cfg.Repo)
+	tokenResult, err := MintToken(cfg.Repo)
 	if err != nil {
 		return fmt.Errorf("failed to mint token: %w", err)
 	}
-	mintedToken = strings.TrimSpace(output)
-	fmt.Println("[agent-run] Token minted (expires in ~1 hour).")
+	mintedToken = tokenResult.Token
+	fmt.Printf("[agent-run] Token minted (expires %s).\n", tokenResult.ExpiresAt.Format(time.RFC3339))
 
 	// Step 3: Create GitHub provider
 	fmt.Println("[agent-run] Creating GitHub provider...")
@@ -133,7 +144,7 @@ func Run(cfg *Config) error {
 
 	// Step 5: Generate repo-specific policy
 	fmt.Printf("[agent-run] Generating sandbox policy for %s...\n", cfg.Repo)
-	policyTmp, err := generatePolicy(cfg.Repo, scriptDir)
+	policyTmp, err := GeneratePolicy(cfg.Repo, repoRoot)
 	if err != nil {
 		return fmt.Errorf("failed to generate policy: %w", err)
 	}
@@ -212,7 +223,7 @@ func Run(cfg *Config) error {
 	}
 
 	launchCmd := fmt.Sprintf("source ~/.profile 2>/dev/null; export GH_TOKEN=$api_token; exec %s %s", harnessCmd, harnessArgs)
-	execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--tty", "--",
+	_ = execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--tty", "--",
 		"bash", "-c", launchCmd)
 
 	fmt.Println("\n[agent-run] Harness exited. Cleaning up...")
@@ -239,26 +250,6 @@ func waitForSandbox(name string) error {
 	}
 }
 
-// findScriptDir finds the directory containing helper scripts.
-func findScriptDir() (string, error) {
-	// Try to find relative to executable
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(filepath.Dir(exe))
-		scriptDir := filepath.Join(dir, "scripts")
-		if _, err := os.Stat(scriptDir); err == nil {
-			return scriptDir, nil
-		}
-	}
-
-	// Fallback: look for script in current directory
-	if _, err := os.Stat("scripts/agent-run.sh"); err == nil {
-		return "scripts", nil
-	}
-
-	return "", fmt.Errorf("cannot find scripts directory")
-}
-
 // printDiagnostics prints diagnostic information.
 func printDiagnostics() error {
 	fmt.Println("=== agent-run diagnostics ===")
@@ -272,24 +263,8 @@ func printDiagnostics() error {
 		fmt.Println("not found")
 	}
 
-	// gh-token version
-	fmt.Print("  gh-token version:   ")
-	out, _ = execCmdOutput("gh", "extension", "list")
-	if strings.Contains(out, "token") {
-		lines := strings.Split(out, "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "token") {
-				parts := strings.Fields(line)
-				if len(parts) >= 3 {
-					fmt.Println(parts[2])
-					break
-				}
-			}
-		}
-	} else {
-		fmt.Println("not found")
-	}
-
+	fmt.Println("  Token minting:      Go-native (repo-scoped)")
+	fmt.Printf("  Installation ID:    %s\n", InstallationID)
 	fmt.Printf("  GitHub App slug:    %s\n", AppSlug)
 	fmt.Printf("  GitHub App ID:      %s\n", AppID)
 	fmt.Println("  Approved repos:    ", strings.Join(ApprovedRepos, ", "))

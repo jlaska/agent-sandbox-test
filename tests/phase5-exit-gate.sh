@@ -10,13 +10,13 @@
 #   - OpenShell gateway running
 #   - GitHub App Keychain entries configured
 #   - LiteLLM Keychain entries configured (for inference tests)
-#   - scripts/mint-token.sh working
+#   - bin/agent-run built
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MINT_SCRIPT="${REPO_ROOT}/scripts/mint-token.sh"
+AGENT_RUN="${REPO_ROOT}/bin/agent-run"
 POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
 LITELLM_PROFILE="${REPO_ROOT}/openshell/litellm-inference-profile.yaml"
 
@@ -71,7 +71,7 @@ echo ""
 
 # --- Step 1: Create providers ---
 echo "--- Setting up providers ---"
-MINTED_TOKEN=$("$MINT_SCRIPT" --token-only 2>/dev/null) || { echo "FATAL: mint token failed"; exit 1; }
+MINTED_TOKEN=$("$AGENT_RUN" --mint-token "$REPO" 2>/dev/null) || { echo "FATAL: mint token failed"; exit 1; }
 
 openshell provider delete github-agent 2>/dev/null || true
 openshell provider create --name github-agent --type github-agent \
@@ -186,7 +186,8 @@ test_expect_fail "Push unauthorized branch" $SBR sh -c "git checkout -b feature/
 test_expect_fail "Create tag" $SBR sh -c "git tag v0.0.99-gate; git push origin v0.0.99-gate"
 test_expect_fail "gh pr merge" $SBR sh -c "export GH_TOKEN=\$api_token; gh pr merge $PR_NUM --merge"
 test_expect_fail "REST merge API" $SBR sh -c "export GH_TOKEN=\$api_token; gh api -X PUT repos/$REPO/pulls/$PR_NUM/merge -f merge_method=merge"
-test_expect_fail "Access unapproved repo" $SBR git clone https://github.com/jlaska/homelab.git /tmp/homelab
+# jlaska/agent-sandbox-denied: permanent canary (never on the App)
+test_expect_fail "Access unapproved repo (canary)" $SBR git clone https://github.com/jlaska/agent-sandbox-denied.git /tmp/denied
 
 # Credential containment
 CRED_CHECK=$($SBR sh -c 'echo "$api_token" | head -c 4' 2>/dev/null)

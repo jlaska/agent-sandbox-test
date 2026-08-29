@@ -192,8 +192,10 @@ fi
 echo ""
 echo "--- Unapproved repository access ---"
 
-expect_failure "Clone unapproved private repo" \
-    git clone "https://github.com/jlaska/homelab.git" "$CLONE_DIR/unapproved" 2>/dev/null
+# jlaska/agent-sandbox-denied is a permanent canary repo that must NEVER
+# be installed on the jlaska-agent GitHub App.
+expect_failure "Clone unapproved private repo (canary)" \
+    git clone "https://github.com/jlaska/agent-sandbox-denied.git" "$CLONE_DIR/unapproved" 2>/dev/null
 
 # --- Section 9: No YubiKey involvement ---
 echo ""
