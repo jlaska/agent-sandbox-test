@@ -1,10 +1,10 @@
 id: github-agent
 display_name: "GitHub Agent (Restricted)"
-description: "GitHub provider for autonomous agents — allows Git push, PR operations, and check inspection. Merge blocking enforced via sandbox policy."
+description: "Reusable GitHub provider for autonomous agents. Credential injection and endpoint routing only — repository-level authorization is enforced by the per-session sandbox policy and repo-scoped installation token."
 category: source_control
 credentials:
   - name: api_token
-    description: GitHub App installation token
+    description: GitHub App installation token (repo-scoped)
     env_vars:
       - GITHUB_TOKEN
       - GH_TOKEN
@@ -19,31 +19,25 @@ endpoints:
     protocol: rest
     enforcement: enforce
     rules:
-      # Repository (read)
+      # Repository operations (scoped by sandbox policy)
       - allow:
           method: GET
-          path: /repos/jlaska/agent-sandbox-test
-      - allow:
-          method: GET
-          path: /repos/jlaska/agent-sandbox-test/**
-
-      # Pull requests: create, update
+          path: /repos/**
       - allow:
           method: POST
-          path: /repos/jlaska/agent-sandbox-test/pulls
+          path: /repos/**/pulls
       - allow:
           method: PATCH
-          path: /repos/jlaska/agent-sandbox-test/pulls/*
-
-      # PR comments
+          path: /repos/**/pulls/*
       - allow:
           method: POST
-          path: /repos/jlaska/agent-sandbox-test/issues/*/comments
-
-      # PR reviews
+          path: /repos/**/issues/*/comments
       - allow:
           method: POST
-          path: /repos/jlaska/agent-sandbox-test/pulls/*/reviews
+          path: /repos/**/pulls/*/reviews
+      - allow:
+          method: DELETE
+          path: /repos/**/git/refs/**
 
       # User identity
       - allow:
@@ -63,7 +57,7 @@ endpoints:
           method: GET
           path: /app
 
-  # GraphQL API — read-only
+  # GraphQL API — read-only queries, restricted mutations
   - host: api.github.com
     port: 443
     protocol: graphql
@@ -71,7 +65,7 @@ endpoints:
     enforcement: enforce
     path: /graphql
 
-  # Git Smart HTTP
+  # Git Smart HTTP (repo scoping enforced by sandbox policy)
   - host: github.com
     port: 443
     protocol: rest
@@ -91,10 +85,7 @@ endpoints:
           path: /**/git-upload-pack
       - allow:
           method: POST
-          path: /jlaska/agent-sandbox-test.git/git-receive-pack
-      - allow:
-          method: POST
-          path: /jlaska/agent-sandbox-test/git-receive-pack
+          path: /**/git-receive-pack
 
 binaries:
   - /usr/bin/gh

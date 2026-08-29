@@ -8,8 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MINT_SCRIPT="${REPO_ROOT}/scripts/mint-token.sh"
-POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
+AGENT_RUN="${REPO_ROOT}/bin/agent-run"
 
 REPO="jlaska/agent-sandbox-test"
 SANDBOX_NAME="exit-gate"
@@ -46,9 +45,10 @@ cleanup() {
     openshell sandbox delete "$SANDBOX_NAME" 2>/dev/null || true
     sleep 2
     if [[ -n "${MINTED_TOKEN:-}" ]]; then
-        "$MINT_SCRIPT" --revoke "$MINTED_TOKEN" 2>/dev/null || true
+        "$AGENT_RUN" --revoke-token "$MINTED_TOKEN" 2>/dev/null || true
     fi
     openshell provider delete "$PROVIDER_NAME" 2>/dev/null || true
+    [[ -n "${POLICY_FILE:-}" ]] && rm -f "$POLICY_FILE"
     echo "  Cleanup complete."
 }
 trap cleanup EXIT INT TERM HUP
@@ -62,8 +62,11 @@ echo ""
 echo "--- Setup ---"
 openshell provider delete "$PROVIDER_NAME" 2>/dev/null || true
 
-MINTED_TOKEN=$("$MINT_SCRIPT" --token-only 2>/dev/null)
+MINTED_TOKEN=$("$AGENT_RUN" --mint-token "$REPO" 2>/dev/null)
 echo "  Token minted."
+
+POLICY_FILE=$("$AGENT_RUN" --generate-policy "$REPO" 2>/dev/null)
+echo "  Policy generated: $POLICY_FILE"
 
 openshell provider create \
     --name "$PROVIDER_NAME" \
@@ -283,9 +286,11 @@ fi
 echo ""
 echo "--- Unapproved repository ---"
 
-expect_denied "Unapproved repo access denied" '
+# jlaska/agent-sandbox-denied is a permanent canary repo that must NEVER
+# be installed on the jlaska-agent GitHub App.
+expect_denied "Unapproved repo access denied (canary)" '
 git config --global credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=\${api_token}\"; }; f"
-git clone https://github.com/jlaska/homelab.git /tmp/unapproved 2>&1 || echo "CLONE_FAILED"
+git clone https://github.com/jlaska/agent-sandbox-denied.git /tmp/unapproved 2>&1 || echo "CLONE_FAILED"
 '
 
 # --- Test: Human Git unchanged ---

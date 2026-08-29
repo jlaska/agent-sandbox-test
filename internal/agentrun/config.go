@@ -22,9 +22,10 @@ const (
 )
 
 // Approved repositories.
+// Add new repos here only after completing the full graduation checklist
+// (GitHub App installation, rulesets, token-scoping tests, policy generation tests).
 var ApprovedRepos = []string{
 	"jlaska/agent-sandbox-test",
-	"jlaska/homelab",
 }
 
 // Config holds parsed command-line arguments and configuration.
@@ -34,12 +35,15 @@ type Config struct {
 	Harness string
 
 	// Optional flags
-	Provider  string
-	Model     string
-	Max       bool
-	Diag      bool
-	ListRepos bool
-	Help      bool
+	Provider       string
+	Model          string
+	Max            bool
+	Diag           bool
+	ListRepos      bool
+	Help           bool
+	MintToken      bool
+	RevokeToken    string
+	GeneratePolicy bool
 }
 
 // harnessCommands maps harness names to their shell commands.
@@ -92,10 +96,13 @@ func ParseArgs(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.Diag, "diag", false, "print diagnostic information")
 	fs.BoolVar(&cfg.ListRepos, "list-repos", false, "list approved repositories")
 	fs.BoolVar(&cfg.Help, "help", false, "print usage")
+	fs.BoolVar(&cfg.MintToken, "mint-token", false, "mint a repo-scoped token and print it")
+	fs.StringVar(&cfg.RevokeToken, "revoke-token", "", "revoke a previously minted token")
+	fs.BoolVar(&cfg.GeneratePolicy, "generate-policy", false, "generate a repo-scoped policy file and print its path")
 
 	// Separate flags from positional args so flags work in any position.
 	var flagArgs, positional []string
-	flagsWithValue := map[string]bool{"--provider": true, "--model": true}
+	flagsWithValue := map[string]bool{"--provider": true, "--model": true, "--revoke-token": true}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
@@ -123,6 +130,24 @@ func ParseArgs(args []string) (*Config, error) {
 		return cfg, nil
 	}
 
+	if cfg.RevokeToken != "" {
+		return cfg, nil
+	}
+
+	if cfg.MintToken || cfg.GeneratePolicy {
+		if len(positional) < 1 {
+			if cfg.MintToken {
+				return nil, fmt.Errorf("usage: agent-run --mint-token <owner/repo>")
+			}
+			return nil, fmt.Errorf("usage: agent-run --generate-policy <owner/repo>")
+		}
+		cfg.Repo = positional[0]
+		if _, _, err := ParseRepo(cfg.Repo); err != nil {
+			return nil, fmt.Errorf("invalid repository: %w", err)
+		}
+		return cfg, nil
+	}
+
 	if len(positional) == 0 {
 		cfg.Help = true
 		printUsage()
@@ -147,6 +172,10 @@ func ParseArgs(args []string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.Repo == "" {
 		return fmt.Errorf("repository is required")
+	}
+
+	if _, _, err := ParseRepo(c.Repo); err != nil {
+		return fmt.Errorf("invalid repository: %w", err)
 	}
 
 	if c.Harness == "" {

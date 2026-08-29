@@ -241,39 +241,6 @@ func setupSandboxAPI(harness, sandboxName string) error {
 		 echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.profile`)
 }
 
-// generatePolicy generates a repo-specific sandbox policy.
-func generatePolicy(repo, scriptDir string) (string, error) {
-	repoRoot := filepath.Dir(scriptDir)
-	policyFile := filepath.Join(repoRoot, "openshell", "sandbox-policy.yaml")
-
-	content, err := os.ReadFile(policyFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to read policy file: %w", err)
-	}
-
-	// Replace repo reference
-	updated := strings.ReplaceAll(string(content), "jlaska/agent-sandbox-test", repo)
-
-	// Write to temp file
-	tmpfile, err := os.CreateTemp("", "agent-run-policy.*.yaml")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp policy file: %w", err)
-	}
-
-	if _, err := tmpfile.WriteString(updated); err != nil {
-		_ = tmpfile.Close()
-		_ = os.Remove(tmpfile.Name())
-		return "", fmt.Errorf("failed to write policy file: %w", err)
-	}
-
-	if err := tmpfile.Close(); err != nil {
-		_ = os.Remove(tmpfile.Name())
-		return "", err
-	}
-
-	return tmpfile.Name(), nil
-}
-
 // installHarness installs harness-specific software in the sandbox.
 func installHarness(harness, sandboxName string) error {
 	switch harness {

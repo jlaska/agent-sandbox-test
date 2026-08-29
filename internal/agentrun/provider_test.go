@@ -3,7 +3,6 @@ package agentrun
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -421,63 +420,6 @@ func TestSetupSandboxAPI(t *testing.T) {
 		cmd := strings.Join(mock.calls[0], " ")
 		if !strings.Contains(cmd, "ANTHROPIC_API_KEY") {
 			t.Error("expected ANTHROPIC_API_KEY in sandbox init")
-		}
-	})
-}
-
-func TestGeneratePolicy(t *testing.T) {
-	// Create a temp directory with a policy file
-	tmpDir := t.TempDir()
-	scriptDir := filepath.Join(tmpDir, "scripts")
-	policyDir := filepath.Join(tmpDir, "openshell")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(policyDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	policyContent := `network_policies:
-  github_git:
-    rules:
-      - path: "/jlaska/agent-sandbox-test.git/info/refs"
-  github_api:
-    rules:
-      - path: "/repos/jlaska/agent-sandbox-test"
-`
-	if err := os.WriteFile(filepath.Join(policyDir, "sandbox-policy.yaml"), []byte(policyContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("replaces repo references", func(t *testing.T) {
-		result, err := generatePolicy("jlaska/homelab", scriptDir)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		defer func() { _ = os.Remove(result) }()
-
-		content, err := os.ReadFile(result)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if strings.Contains(string(content), "agent-sandbox-test") {
-			t.Error("policy still contains agent-sandbox-test")
-		}
-		if !strings.Contains(string(content), "jlaska/homelab") {
-			t.Error("policy does not contain jlaska/homelab")
-		}
-	})
-
-	t.Run("missing policy file", func(t *testing.T) {
-		emptyDir := t.TempDir()
-		emptyScriptDir := filepath.Join(emptyDir, "scripts")
-		if err := os.MkdirAll(emptyScriptDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		_, err := generatePolicy("jlaska/homelab", emptyScriptDir)
-		if err == nil {
-			t.Error("expected error for missing policy file")
 		}
 	})
 }

@@ -15,12 +15,11 @@ intentionally trivial — it is not production infrastructure.
 
 ## agent-run
 
-The `agent-run` command launches sandboxed agent sessions. It is available as:
+The `agent-run` Go binary is the single supported entry point for launching
+sandboxed agent sessions. It handles repository-scoped token minting,
+single-repository OpenShell policy generation, and secure cleanup.
 
-- **Shell script**: `scripts/agent-run.sh` - Original bash implementation
-- **Go binary**: `cmd/agent-run/` - Native Go implementation
-
-### Building the Go binary
+### Building
 
 ```bash
 # Build the binary
@@ -62,3 +61,5 @@ agent-run --list-repos
 - `--max` - Claude Max subscription via LiteLLM
 - `--diag` - Print diagnostic information
 - `--list-repos` - List approved repositories
+- `--mint-token` - Mint a repo-scoped token (for testing/scripts)
+- `--revoke-token` - Revoke a previously minted token
