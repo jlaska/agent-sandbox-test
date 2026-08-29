@@ -116,7 +116,7 @@ CLEANED_UP=false
 cleanup() {
     [[ "$CLEANED_UP" == "true" ]] && return
     CLEANED_UP=true
-    local exit_code=$?
+    local exit_code=${HARNESS_EXIT:-$?}
     echo ""
     echo "--- Cleanup ---"
 

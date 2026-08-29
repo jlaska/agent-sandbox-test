@@ -13,6 +13,7 @@ OPENSHELL_VERSION=v0.0.113 curl -LsSf https://raw.githubusercontent.com/NVIDIA/O
 ```
 
 The installer:
+
 - Added the `nvidia/openshell` Homebrew tap
 - Installed the `openshell` CLI and gateway binary
 - Registered a launchd service via `brew services`
@@ -23,6 +24,7 @@ The installer:
 **Available alternatives:** MicroVM (libkrun + Apple Hypervisor), Docker Desktop
 
 Podman was selected because:
+
 1. Already installed and running (v6.0.2 with Apple Hypervisor VM)
 2. Rootless containers provide good isolation without a root daemon
 3. Well-supported by OpenShell on macOS
@@ -35,6 +37,7 @@ MicroVM would provide stronger (VM-boundary) isolation but is opt-in and was not
 The gateway auto-detection does not find Podman's API socket on macOS. Manual configuration was required:
 
 **`~/.config/openshell/gateway.toml`:**
+
 ```toml
 [openshell.gateway]
 compute_drivers = ["podman"]
@@ -44,11 +47,13 @@ socket_path = "/var/folders/w0/dvf1mnks5xb9yshjt5gbf69m0000gn/T/podman/podman-ma
 ```
 
 > **Note:** The socket path is under `/var/folders` which is session-specific on macOS. If the Podman machine is recreated, this path may change. Find the current path with:
+>
 > ```bash
 > podman machine inspect podman-machine-default | grep -A1 PodmanSocket
 > ```
 
 After configuration:
+
 ```bash
 brew services restart nvidia/openshell/openshell
 openshell status  # → Connected, Authenticated (mTLS transport)
@@ -57,6 +62,7 @@ openshell status  # → Connected, Authenticated (mTLS transport)
 ## Sandbox lifecycle
 
 ### Create
+
 ```bash
 openshell sandbox create --name <name>           # persistent sandbox
 openshell sandbox create --name <name> --no-keep  # auto-delete after command exits
@@ -64,16 +70,19 @@ openshell sandbox create --name <name> -- <cmd>   # run command immediately
 ```
 
 ### Execute commands
+
 ```bash
 openshell sandbox exec -n <name> -- <command>
 ```
 
 ### List
+
 ```bash
 openshell sandbox list
 ```
 
 ### Delete
+
 ```bash
 openshell sandbox delete <name>
 ```
@@ -81,11 +90,13 @@ openshell sandbox delete <name>
 Deletion takes ~15–25 seconds as the Podman container is stopped and removed. No orphaned containers remain after deletion.
 
 ### Logs
+
 ```bash
 openshell logs <name>                    # combined sandbox + gateway logs
 ```
 
 Sandbox-internal logs are at:
+
 - `/var/log/openshell.YYYY-MM-DD.log` — structured supervisor log
 - `/var/log/openshell-ocsf.YYYY-MM-DD.log` — OCSF-formatted security events
 
@@ -107,6 +118,7 @@ Sandbox-internal logs are at:
 The sandbox ships with a default policy at `/etc/openshell/policy.yaml` that implements:
 
 ### Architecture
+
 - **OPA (Open Policy Agent)** engine for L4 (CONNECT) decisions
 - **L7 engine** for HTTP method/path enforcement
 - **Binary identity enforcement** — network access depends on which binary makes the request, resolved via `/proc/net/tcp` inode lookup + `/proc/{pid}/exe`
@@ -135,7 +147,7 @@ The sandbox ships with a default policy at `/etc/openshell/policy.yaml` that imp
 
 Denied requests appear in `openshell logs <name>` as OCSF events:
 
-```
+```text
 [OCSF] NET:OPEN [MED] DENIED /usr/bin/curl(83) -> httpbin.org:443
   [policy:- engine:opa] [reason:endpoint httpbin.org:443 is not allowed by any policy]
 
@@ -144,6 +156,7 @@ Denied requests appear in `openshell logs <name>` as OCSF events:
 ```
 
 Each denial includes:
+
 - The binary path and PID
 - The target endpoint
 - The policy that was evaluated

@@ -2,7 +2,7 @@
 
 ## Mac Git Configuration (recorded, not modified)
 
-```
+```text
 user.name       = James Laska
 user.email      = 1051173+jlaska@users.noreply.github.com
 commit.gpgsign  = true

@@ -42,27 +42,30 @@ func Run(cfg *Config) error {
 
 	// State for cleanup
 	var (
-		sandboxName    string
-		mintedToken    string
+		sandboxName      string
+		mintedToken      string
 		providersCreated []string
 	)
 
 	// Cleanup function
 	defer func() {
-		fmt.Println("\n--- Cleanup ---")
+		fmt.Println("--- Cleanup ---")
 		if sandboxName != "" {
-			fmt.Printf("  Deleting sandbox: %s\n", sandboxName)
-			execCmd("openshell", "sandbox", "delete", sandboxName)
+			fmt.Printf("  Deleting sandbox: %s ... ", sandboxName)
+			_ = execCmdSilent("openshell", "sandbox", "delete", sandboxName)
+			fmt.Println("done")
 		}
 		if mintedToken != "" {
-			fmt.Println("  Revoking installation token...")
+			fmt.Print("  Revoking installation token ... ")
 			mintScript := filepath.Join(scriptDir, "mint-token.sh")
-			execCmd(mintScript, "--revoke", mintedToken)
+			_ = execCmdSilent(mintScript, "--revoke", mintedToken)
 			mintedToken = ""
+			fmt.Println("done")
 		}
 		for _, prov := range providersCreated {
-			fmt.Printf("  Deleting provider: %s\n", prov)
-			execCmd("openshell", "provider", "delete", prov)
+			fmt.Printf("  Deleting provider: %s ... ", prov)
+			_ = execCmdSilent("openshell", "provider", "delete", prov)
+			fmt.Println("done")
 		}
 		fmt.Println("  Cleanup complete.")
 	}()
@@ -101,7 +104,7 @@ func Run(cfg *Config) error {
 
 	// Step 3: Create GitHub provider
 	fmt.Println("[agent-run] Creating GitHub provider...")
-	execCmd("openshell", "provider", "delete", GitHubProviderName)
+	_ = execCmd("openshell", "provider", "delete", GitHubProviderName)
 	if err := execCmd("openshell", "provider", "create",
 		"--name", GitHubProviderName,
 		"--type", "github-agent",
@@ -134,7 +137,7 @@ func Run(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate policy: %w", err)
 	}
-	defer os.Remove(policyTmp)
+	defer func() { _ = os.Remove(policyTmp) }()
 
 	// Step 6: Create sandbox
 	fmt.Printf("[agent-run] Creating sandbox '%s'...\n", sandboxName)
@@ -209,34 +212,12 @@ func Run(cfg *Config) error {
 	}
 
 	launchCmd := fmt.Sprintf("source ~/.profile 2>/dev/null; export GH_TOKEN=$api_token; exec %s %s", harnessCmd, harnessArgs)
-	execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--",
+	_ = execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--workdir", "/sandbox/repo", "--tty", "--",
 		"bash", "-c", launchCmd)
 
+	fmt.Println("\n[agent-run] Harness exited. Cleaning up...")
+
 	return nil
-}
-
-// execCmd runs a command and returns any error.
-func execCmd(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// execCmdSilent runs a command without showing output.
-func execCmdSilent(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
-}
-
-// execCmdOutput runs a command and returns its output.
-func execCmdOutput(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }
 
 // waitForSandbox waits for a sandbox to become ready.
@@ -392,6 +373,5 @@ func printDiagnostics() error {
 
 // keychainExists checks if a keychain entry exists (macOS only).
 func keychainExists(service string) bool {
-	cmd := exec.Command("security", "find-generic-password", "-s", service, "-a", os.Getenv("USER"))
-	return cmd.Run() == nil
+	return execCmdSilent("security", "find-generic-password", "-s", service, "-a", os.Getenv("USER")) == nil
 }

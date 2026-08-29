@@ -80,7 +80,7 @@ openshell sandbox create \
     >/dev/null 2>&1
 
 # Wait for ready
-for i in $(seq 1 30); do
+for _i in $(seq 1 30); do
     if openshell sandbox list 2>/dev/null | grep -q "${SANDBOX_NAME}.*Ready"; then
         break
     fi

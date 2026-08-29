@@ -6,7 +6,7 @@ Phase 5 validates that multiple coding agents can operate within the OpenShell s
 
 ## Usage
 
-```
+```bash
 agent-run <repo> <harness> [--provider <provider>] [--model <model>] [--max]
 ```
 
@@ -38,7 +38,7 @@ agent-run jlaska/agent-sandbox-test shell                                     # 
 
 The launcher separates three concerns: harness (which agent binary), provider (where model calls go), and model (which model to request). The GitHub credential path is identical for all combinations — the Phase 4 `github-agent` provider.
 
-```
+```text
 agent-run <repo> <harness> [--provider <provider>] [--model <model>]
   │
   ├── GitHub provider (github-agent)
@@ -54,11 +54,12 @@ agent-run <repo> <harness> [--provider <provider>] [--model <model>]
 
 ## 5.1 Claude Code
 
-**Status: Proven**
+**Status:** Proven
 
 ### Auth path
 
 Claude Code uses API key mode with the LiteLLM proxy:
+
 - `ANTHROPIC_API_KEY` is set to a deferred reference (`$litellm_api_key`) that the sandbox resolves to the provider placeholder. The gateway injects the real credential in the `x-api-key` HTTP header.
 - `ANTHROPIC_BASE_URL` points to the LiteLLM proxy endpoint.
 - The builtin `claude-code` OpenShell provider is required because OpenShell auto-detects the `claude` binary and demands its corresponding provider.
@@ -80,17 +81,18 @@ An optional `--max` flag on `agent-run` adds `ANTHROPIC_CUSTOM_HEADERS` with the
 
 The LiteLLM key's model access list must include the models Claude Code requests. If the key restricts models (e.g., only `anthropic/claude-sonnet-4.6`), Claude Code will fail with a model access error. This is a LiteLLM proxy configuration concern, not a sandbox issue.
 
-### Exit gate results
+### Claude Code exit gate results
 
 **16/16 tests passed.**
 
 ## 5.2 Pi
 
-**Status: Proven**
+**Status:** Proven
 
-### Auth path
+### Pi auth path
 
 Pi uses the `pi-provider-litellm` plugin to connect to the LiteLLM proxy:
+
 - `LITELLM_BASE_URL` points to the LiteLLM proxy endpoint.
 - `LITELLM_API_KEY` is mapped to the `litellm_api_key` provider placeholder.
 - Pi is not pre-installed in the default OpenShell sandbox image. `agent-run.sh` installs it at sandbox creation via `npm install -g @earendil-works/pi-coding-agent` to `/sandbox/.npm-global`.
@@ -99,21 +101,22 @@ Pi uses the `pi-provider-litellm` plugin to connect to the LiteLLM proxy:
 
 The sandbox policy includes an `npm_registry` network policy allowing GET requests to `registry.npmjs.org` with `allow_encoded_slash: true` (required for scoped packages like `@earendil-works/pi-coding-agent`).
 
-### Exit gate results
+### Pi exit gate results
 
 **16/16 tests passed.**
 
 ## 5.3 Codex CLI
 
-**Status: Skipped (user decision)**
+**Status:** Skipped (user decision)
 
 Codex CLI (`@openai/codex@0.117.0`) is pre-installed in the default OpenShell sandbox image. A builtin `codex` provider profile exists with OAuth credential fields. Setup would follow the same pattern as Claude Code but with OpenAI endpoints. Can be added when the user is ready.
 
 ## 5.4 OpenClaw
 
-**Status: Skipped — upstream blocker**
+**Status:** Skipped — upstream blocker
 
 OpenClaw/NemoClaw is not available:
+
 - Not installed on the host (not in npm or pip)
 - No OpenShell provider profile exists
 - No public package found
@@ -133,6 +136,7 @@ Per the Phase 5 plan: "OpenClaw proven, or a concrete upstream blocker is docume
 ## Common GitHub security policy
 
 The shared policy from Phase 4 remains intact for all agents:
+
 - Agent branches (`agent/**`): push allowed
 - Protected branches (`main`, `feature/**`, etc.): push denied (GitHub rulesets)
 - Tags: create/update/delete denied (GitHub rulesets)

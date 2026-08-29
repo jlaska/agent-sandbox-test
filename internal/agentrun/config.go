@@ -34,12 +34,12 @@ type Config struct {
 	Harness string
 
 	// Optional flags
-	Provider     string
-	Model        string
-	Max          bool
-	Diag         bool
-	ListRepos    bool
-	Help         bool
+	Provider  string
+	Model     string
+	Max       bool
+	Diag      bool
+	ListRepos bool
+	Help      bool
 }
 
 // harnessCommands maps harness names to their shell commands.

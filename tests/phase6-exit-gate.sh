@@ -22,7 +22,7 @@ POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
 LITELLM_PROFILE="${REPO_ROOT}/openshell/litellm-inference-profile.yaml"
 
 REPO="${REPO:-jlaska/agent-sandbox-test}"
-SKIP_PR_PROOF=false
+export SKIP_PR_PROOF=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --repo) REPO="$2"; shift 2 ;;

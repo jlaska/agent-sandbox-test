@@ -14,7 +14,7 @@ SRC_DIR := ./cmd/agent-run
 PKG_DIR := ./internal/agentrun
 BUILD_DIR := ./bin
 
-.PHONY: all build clean test lint install help
+.PHONY: all build clean test lint install setup help
 
 ## all: Build the binary
 all: build
@@ -63,6 +63,20 @@ install:
 fmt:
 	@echo "Formatting..."
 	$(GO) fmt ./...
+
+## setup: Install pre-commit hooks and development dependencies
+setup:
+	@echo "Installing development dependencies..."
+	@which pre-commit > /dev/null 2>&1 || { echo "Installing pre-commit..."; brew install pre-commit; }
+	@which golangci-lint > /dev/null 2>&1 || { echo "Installing golangci-lint..."; brew install golangci-lint; }
+	@which shellcheck > /dev/null 2>&1 || { echo "Installing shellcheck..."; brew install shellcheck; }
+	@which gitleaks > /dev/null 2>&1 || { echo "Installing gitleaks..."; brew install gitleaks; }
+	@echo "Installing pre-commit hooks..."
+	pre-commit install
+	@echo "Validating hook configuration..."
+	pre-commit run --all-files || true
+	@echo ""
+	@echo "Setup complete. Pre-commit hooks are installed."
 
 ## help: Show this help message
 help:
