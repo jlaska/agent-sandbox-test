@@ -1,3 +1,3 @@
-module github.com/jlaska/agent-sandbox-test
+module github.com/jlaska/agent-sandbox
 
 go 1.21

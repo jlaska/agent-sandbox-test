@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jlaska/agent-sandbox-test/internal/agentrun"
+	"github.com/jlaska/agent-sandbox/internal/agentrun"
 )
 
 func main() {

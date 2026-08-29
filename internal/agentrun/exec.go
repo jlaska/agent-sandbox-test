@@ -3,6 +3,7 @@ package agentrun
 import (
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Command execution functions, replaceable in tests.
@@ -41,4 +42,9 @@ func defaultExecCmdOutput(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// shellQuote wraps a string in single quotes for safe embedding in bash -c.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -318,18 +318,18 @@ func TestMintTokenIntegration(t *testing.T) {
 		_ = json.Unmarshal(body, &reqBody)
 
 		repos := reqBody["repositories"].([]interface{})
-		if len(repos) != 1 || repos[0] != "agent-sandbox-test" {
-			t.Errorf("expected repos=[agent-sandbox-test], got %v", repos)
+		if len(repos) != 1 || repos[0] != "agent-sandbox" {
+			t.Errorf("expected repos=[agent-sandbox], got %v", repos)
 		}
 
-		resp := `{"token":"ghs_scoped","expires_at":"2025-01-01T01:00:00Z","repositories":[{"full_name":"jlaska/agent-sandbox-test"}]}`
+		resp := `{"token":"ghs_scoped","expires_at":"2025-01-01T01:00:00Z","repositories":[{"full_name":"jlaska/agent-sandbox"}]}`
 		return &http.Response{
 			StatusCode: 201,
 			Body:       io.NopCloser(strings.NewReader(resp)),
 		}, nil
 	}
 
-	result, err := MintToken("jlaska/agent-sandbox-test")
+	result, err := MintToken("jlaska/agent-sandbox")
 	if err != nil {
 		t.Fatalf("MintToken() error: %v", err)
 	}
