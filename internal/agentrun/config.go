@@ -24,6 +24,7 @@ const (
 // Approved repositories.
 var ApprovedRepos = []string{
 	"jlaska/agent-sandbox-test",
+	"jlaska/homelab",
 }
 
 // Config holds parsed command-line arguments and configuration.
@@ -80,6 +81,7 @@ func harnessSupportsProvider(harness, provider string) bool {
 }
 
 // ParseArgs parses command-line arguments into a Config.
+// Flags may appear before, after, or between positional arguments.
 func ParseArgs(args []string) (*Config, error) {
 	cfg := &Config{}
 
@@ -91,11 +93,25 @@ func ParseArgs(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.ListRepos, "list-repos", false, "list approved repositories")
 	fs.BoolVar(&cfg.Help, "help", false, "print usage")
 
-	if err := fs.Parse(args); err != nil {
-		return nil, err
+	// Separate flags from positional args so flags work in any position.
+	var flagArgs, positional []string
+	flagsWithValue := map[string]bool{"--provider": true, "--model": true}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			flagArgs = append(flagArgs, a)
+			if flagsWithValue[a] && i+1 < len(args) {
+				i++
+				flagArgs = append(flagArgs, args[i])
+			}
+		} else {
+			positional = append(positional, a)
+		}
 	}
 
-	cfg.Help = cfg.Help || fs.NArg() == 0
+	if err := fs.Parse(flagArgs); err != nil {
+		return nil, err
+	}
 
 	if cfg.Help {
 		printUsage()
@@ -107,12 +123,22 @@ func ParseArgs(args []string) (*Config, error) {
 		return cfg, nil
 	}
 
-	if fs.NArg() < 2 {
+	if len(positional) == 0 {
+		cfg.Help = true
+		printUsage()
+		return cfg, nil
+	}
+
+	if len(positional) < 2 {
 		return nil, fmt.Errorf("usage: agent-run <owner/repo> <harness> [options]")
 	}
 
-	cfg.Repo = fs.Arg(0)
-	cfg.Harness = fs.Arg(1)
+	cfg.Repo = positional[0]
+	cfg.Harness = positional[1]
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }

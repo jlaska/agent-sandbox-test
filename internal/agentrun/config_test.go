@@ -230,6 +230,7 @@ func TestIsApprovedRepo(t *testing.T) {
 		want bool
 	}{
 		{"jlaska/agent-sandbox-test", true},
+		{"jlaska/homelab", true},
 		{"unknown/repo", false},
 		{"", false},
 	}

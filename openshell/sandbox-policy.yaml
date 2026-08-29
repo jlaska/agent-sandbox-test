@@ -37,6 +37,15 @@ network_policies:
           - allow:
               method: POST
               path: "/jlaska/agent-sandbox-test.git/git-receive-pack"
+          - allow:
+              method: GET
+              path: "/jlaska/homelab.git/info/refs*"
+          - allow:
+              method: POST
+              path: "/jlaska/homelab.git/git-upload-pack"
+          - allow:
+              method: POST
+              path: "/jlaska/homelab.git/git-receive-pack"
     binaries:
       - { path: /usr/bin/git }
       - { path: /usr/lib/git-core/git-remote-http }
@@ -70,6 +79,27 @@ network_policies:
           - allow:
               method: DELETE
               path: "/repos/jlaska/agent-sandbox-test/git/refs/**"
+          - allow:
+              method: GET
+              path: "/repos/jlaska/homelab"
+          - allow:
+              method: GET
+              path: "/repos/jlaska/homelab/**"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/homelab/pulls"
+          - allow:
+              method: PATCH
+              path: "/repos/jlaska/homelab/pulls/*"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/homelab/issues/*/comments"
+          - allow:
+              method: POST
+              path: "/repos/jlaska/homelab/pulls/*/reviews"
+          - allow:
+              method: DELETE
+              path: "/repos/jlaska/homelab/git/refs/**"
           - allow:
               method: GET
               path: "/user"
