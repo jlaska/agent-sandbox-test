@@ -24,20 +24,30 @@ func TestListAppRepos(t *testing.T) {
 		return "", nil
 	}
 
-	t.Run("successful listing", func(t *testing.T) {
-		httpDo = func(req *http.Request) (*http.Response, error) {
-			if req.Method != "GET" {
-				t.Errorf("expected GET, got %s", req.Method)
+	// Mock that handles both the token mint POST and the repo listing GET.
+	listMock := func(repoJSON string) func(*http.Request) (*http.Response, error) {
+		return func(req *http.Request) (*http.Response, error) {
+			if req.Method == "POST" && strings.Contains(req.URL.Path, "/access_tokens") {
+				return &http.Response{
+					StatusCode: 201,
+					Body:       io.NopCloser(strings.NewReader(`{"token":"ghs_list_token"}`)),
+				}, nil
 			}
-			if !strings.Contains(req.URL.Path, "/repositories") {
-				t.Errorf("unexpected path: %s", req.URL.Path)
+			if req.Method == "GET" && strings.Contains(req.URL.Path, "/installation/repositories") {
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(strings.NewReader(repoJSON)),
+				}, nil
 			}
-			resp := `{"repositories":[{"full_name":"jlaska/agent-sandbox"},{"full_name":"jlaska/homelab"}]}`
 			return &http.Response{
-				StatusCode: 200,
-				Body:       io.NopCloser(strings.NewReader(resp)),
+				StatusCode: 404,
+				Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
 			}, nil
 		}
+	}
+
+	t.Run("successful listing", func(t *testing.T) {
+		httpDo = listMock(`{"repositories":[{"full_name":"jlaska/agent-sandbox"},{"full_name":"jlaska/homelab"}]}`)
 
 		repos, err := ListAppRepos()
 		if err != nil {
@@ -69,12 +79,7 @@ func TestListAppRepos(t *testing.T) {
 	})
 
 	t.Run("empty installation", func(t *testing.T) {
-		httpDo = func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: 200,
-				Body:       io.NopCloser(strings.NewReader(`{"repositories":[]}`)),
-			}, nil
-		}
+		httpDo = listMock(`{"repositories":[]}`)
 
 		repos, err := ListAppRepos()
 		if err != nil {
@@ -103,6 +108,12 @@ func TestIsAppRepoAccessible(t *testing.T) {
 	}
 
 	httpDo = func(req *http.Request) (*http.Response, error) {
+		if req.Method == "POST" && strings.Contains(req.URL.Path, "/access_tokens") {
+			return &http.Response{
+				StatusCode: 201,
+				Body:       io.NopCloser(strings.NewReader(`{"token":"ghs_list"}`)),
+			}, nil
+		}
 		resp := `{"repositories":[{"full_name":"jlaska/agent-sandbox"},{"full_name":"jlaska/homelab"}]}`
 		return &http.Response{
 			StatusCode: 200,

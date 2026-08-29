@@ -152,6 +152,48 @@ func generateAppJWT(appID string, keyPEM []byte) (string, error) {
 	return sigInput + "." + base64URLEncode(sig), nil
 }
 
+// mintInstallationTokenUnscoped mints an installation token with access to all
+// repos the App is installed on (no repository scope restriction).
+func mintInstallationTokenUnscoped(jwt, installationID string) (string, error) {
+	url := fmt.Sprintf("%s/app/installations/%s/access_tokens", githubAPIBase, installationID)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := httpDo(req)
+	if err != nil {
+		return "", fmt.Errorf("API request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("token minting failed (HTTP %d): %s", resp.StatusCode, redactTokenInResponse(string(respBody)))
+	}
+
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	if result.Token == "" {
+		return "", fmt.Errorf("API returned empty token")
+	}
+
+	return result.Token, nil
+}
+
 func mintInstallationToken(jwt, installationID, owner, repoName string) (*TokenResult, error) {
 	url := fmt.Sprintf("%s/app/installations/%s/access_tokens", githubAPIBase, installationID)
 
