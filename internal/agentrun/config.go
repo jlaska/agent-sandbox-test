@@ -35,14 +35,15 @@ type Config struct {
 	Harness string
 
 	// Optional flags
-	Provider    string
-	Model       string
-	Max         bool
-	Diag        bool
-	ListRepos   bool
-	Help        bool
-	MintToken   bool
-	RevokeToken string
+	Provider       string
+	Model          string
+	Max            bool
+	Diag           bool
+	ListRepos      bool
+	Help           bool
+	MintToken      bool
+	RevokeToken    string
+	GeneratePolicy bool
 }
 
 // harnessCommands maps harness names to their shell commands.
@@ -97,6 +98,7 @@ func ParseArgs(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.Help, "help", false, "print usage")
 	fs.BoolVar(&cfg.MintToken, "mint-token", false, "mint a repo-scoped token and print it")
 	fs.StringVar(&cfg.RevokeToken, "revoke-token", "", "revoke a previously minted token")
+	fs.BoolVar(&cfg.GeneratePolicy, "generate-policy", false, "generate a repo-scoped policy file and print its path")
 
 	// Separate flags from positional args so flags work in any position.
 	var flagArgs, positional []string
@@ -132,9 +134,12 @@ func ParseArgs(args []string) (*Config, error) {
 		return cfg, nil
 	}
 
-	if cfg.MintToken {
+	if cfg.MintToken || cfg.GeneratePolicy {
 		if len(positional) < 1 {
-			return nil, fmt.Errorf("usage: agent-run --mint-token <owner/repo>")
+			if cfg.MintToken {
+				return nil, fmt.Errorf("usage: agent-run --mint-token <owner/repo>")
+			}
+			return nil, fmt.Errorf("usage: agent-run --generate-policy <owner/repo>")
 		}
 		cfg.Repo = positional[0]
 		if _, _, err := ParseRepo(cfg.Repo); err != nil {

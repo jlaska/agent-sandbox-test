@@ -18,7 +18,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_RUN="${REPO_ROOT}/bin/agent-run"
-POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
 LITELLM_PROFILE="${REPO_ROOT}/openshell/litellm-inference-profile.yaml"
 
 REPO="${REPO:-jlaska/agent-sandbox-test}"
@@ -61,6 +60,7 @@ cleanup() {
     openshell provider delete github-agent 2>/dev/null || true
     openshell provider delete claude-code 2>/dev/null || true
     openshell provider delete litellm-inference 2>/dev/null || true
+    [[ -n "${POLICY_FILE:-}" ]] && rm -f "$POLICY_FILE"
     gh pr list --repo "$REPO" --head "$BRANCH" --json number -q ".[0].number" 2>/dev/null | \
         xargs -I{} gh pr close {} --repo "$REPO" --delete-branch 2>/dev/null || true
     git push origin --delete "$BRANCH" 2>/dev/null || true
@@ -81,7 +81,7 @@ echo "--- Prerequisite checks ---"
 test_expect_pass "OpenShell gateway running" openshell status
 test_expect_pass "Token minting works" "$AGENT_RUN" --mint-token "$REPO"
 test_expect_pass "agent-run binary exists" test -f "$REPO_ROOT/bin/agent-run"
-test_expect_pass "Sandbox policy exists" test -f "$POLICY_FILE"
+test_expect_pass "Sandbox policy template exists" test -f "$REPO_ROOT/openshell/sandbox-policy.yaml"
 
 REPO_IN_ALLOWLIST=$(grep -c "$REPO" "$REPO_ROOT/internal/agentrun/config.go" 2>/dev/null || echo 0)
 if [[ "$REPO_IN_ALLOWLIST" -gt 0 ]]; then
@@ -115,6 +115,7 @@ echo ""
 echo "--- Security regression (sandboxed) ---"
 
 MINTED_TOKEN=$("$AGENT_RUN" --mint-token "$REPO" 2>/dev/null) || { echo "FATAL: mint failed"; exit 1; }
+POLICY_FILE=$("$AGENT_RUN" --generate-policy "$REPO" 2>/dev/null) || { echo "FATAL: policy generation failed"; exit 1; }
 
 openshell provider delete github-agent 2>/dev/null || true
 openshell provider create --name github-agent --type github-agent \

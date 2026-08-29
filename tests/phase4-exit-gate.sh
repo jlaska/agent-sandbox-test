@@ -9,7 +9,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_RUN="${REPO_ROOT}/bin/agent-run"
-POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
 
 REPO="jlaska/agent-sandbox-test"
 SANDBOX_NAME="exit-gate"
@@ -49,6 +48,7 @@ cleanup() {
         "$AGENT_RUN" --revoke-token "$MINTED_TOKEN" 2>/dev/null || true
     fi
     openshell provider delete "$PROVIDER_NAME" 2>/dev/null || true
+    [[ -n "${POLICY_FILE:-}" ]] && rm -f "$POLICY_FILE"
     echo "  Cleanup complete."
 }
 trap cleanup EXIT INT TERM HUP
@@ -64,6 +64,9 @@ openshell provider delete "$PROVIDER_NAME" 2>/dev/null || true
 
 MINTED_TOKEN=$("$AGENT_RUN" --mint-token "$REPO" 2>/dev/null)
 echo "  Token minted."
+
+POLICY_FILE=$("$AGENT_RUN" --generate-policy "$REPO" 2>/dev/null)
+echo "  Policy generated: $POLICY_FILE"
 
 openshell provider create \
     --name "$PROVIDER_NAME" \

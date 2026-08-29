@@ -42,6 +42,16 @@ func Run(cfg *Config) error {
 		return nil
 	}
 
+	if cfg.GeneratePolicy {
+		repoRoot := findRepoRoot()
+		policyPath, err := GeneratePolicy(cfg.Repo, repoRoot)
+		if err != nil {
+			return err
+		}
+		fmt.Print(policyPath)
+		return nil
+	}
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return err

@@ -17,7 +17,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_RUN="${REPO_ROOT}/bin/agent-run"
-POLICY_FILE="${REPO_ROOT}/openshell/sandbox-policy.yaml"
 LITELLM_PROFILE="${REPO_ROOT}/openshell/litellm-inference-profile.yaml"
 
 AGENT="${1:?Usage: $0 <agent> [--skip-inference]}"
@@ -56,6 +55,7 @@ cleanup() {
     openshell provider delete github-agent 2>/dev/null || true
     openshell provider delete claude-code 2>/dev/null || true
     openshell provider delete litellm-inference 2>/dev/null || true
+    [[ -n "${POLICY_FILE:-}" ]] && rm -f "$POLICY_FILE"
     # Clean up test branch/PR
     gh pr list --repo "$REPO" --head "$BRANCH" --json number -q ".[0].number" 2>/dev/null | \
         xargs -I{} gh pr close {} --repo "$REPO" --delete-branch 2>/dev/null || true
@@ -72,6 +72,7 @@ echo ""
 # --- Step 1: Create providers ---
 echo "--- Setting up providers ---"
 MINTED_TOKEN=$("$AGENT_RUN" --mint-token "$REPO" 2>/dev/null) || { echo "FATAL: mint token failed"; exit 1; }
+POLICY_FILE=$("$AGENT_RUN" --generate-policy "$REPO" 2>/dev/null) || { echo "FATAL: policy generation failed"; exit 1; }
 
 openshell provider delete github-agent 2>/dev/null || true
 openshell provider create --name github-agent --type github-agent \
