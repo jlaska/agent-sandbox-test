@@ -157,7 +157,7 @@ func TestSetupProviderLiteLLM(t *testing.T) {
 
 	t.Run("claude with max but no bearer token", func(t *testing.T) {
 		withMockKeychain(t, map[string]string{
-			"litellm-api-key":  "test-key",
+			"litellm-api-key":    "test-key",
 			"anthropic-base-url": "https://test.example.com",
 		}, func() {
 			_, _, _, err := setupProviderLiteLLM("claude", true)

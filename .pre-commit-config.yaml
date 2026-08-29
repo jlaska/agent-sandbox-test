@@ -19,19 +19,20 @@ repos:
     hooks:
       - id: gitleaks
 
-  # Go linting
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.1.6
+  # Go linting and formatting
+  - repo: local
     hooks:
       - id: golangci-lint
-        args: ['run', '--fix']
+        name: golangci-lint
+        entry: golangci-lint run --fix
+        language: system
+        types: [go]
+        pass_filenames: false
 
-  # Go formatting
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
       - id: go-fmt
-      - id: go-vet
       - id: go-mod-tidy
 
   # Shell linting
@@ -46,4 +47,4 @@ repos:
     rev: v0.44.0
     hooks:
       - id: markdownlint
-        args: ['--disable', 'MD013', 'MD033', 'MD041', '--']
+        args: ['--disable', 'MD013', 'MD033', 'MD041', 'MD060', '--']

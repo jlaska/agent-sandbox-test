@@ -59,6 +59,7 @@ denied at the L7 layer.
 #### REST API (github_api)
 
 Allowed:
+
 - `GET /repos/jlaska/agent-sandbox-test/**` (read metadata, contents)
 - `POST /repos/.../pulls` (create PR)
 - `PATCH /repos/.../pulls/*` (update PR)
@@ -72,6 +73,7 @@ No `PUT` method is allowed — this implicitly blocks the merge REST endpoint.
 #### GraphQL API (github_graphql)
 
 Allowed:
+
 - All queries (read operations)
 - Mutations: `createPullRequest`, `updatePullRequest`, `addComment`,
   `addPullRequestReview`, `submitPullRequestReview`, `requestReviews`,
@@ -79,6 +81,7 @@ Allowed:
   `convertPullRequestToDraft`
 
 Denied (deny_rules):
+
 - `mergePullRequest`
 - `enablePullRequestAutoMerge`
 
@@ -122,6 +125,7 @@ The launcher performs:
 11. On exit (trap-guaranteed): revokes token, deletes sandbox, deletes provider
 
 Diagnostics mode (`--diag`) prints:
+
 - OpenShell and gh-token versions
 - Gateway status
 - App metadata

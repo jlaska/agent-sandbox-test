@@ -45,16 +45,19 @@ agent-run --list-repos
 ```
 
 **Harnesses** (the agent binary):
+
 - `claude` - Claude Code CLI
 - `pi` - Pi coding agent
 - `shell` - Interactive bash
 
 **Providers** (where model calls go):
+
 - `litellm` - LiteLLM proxy (default)
 - `vertex` - Direct Google Vertex AI
 - `api` - Direct Anthropic API
 
 **Flags**:
+
 - `--model` - Override the default model
 - `--max` - Claude Max subscription via LiteLLM
 - `--diag` - Print diagnostic information

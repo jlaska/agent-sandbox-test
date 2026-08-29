@@ -18,7 +18,6 @@ REPO="${REPO:-jlaska/agent-sandbox-test}"
 CLONE_DIR=""
 CLEANUP_CLONE=false
 PASS=0
-FAIL=0
 ERRORS=0
 
 while [[ $# -gt 0 ]]; do
@@ -131,7 +130,7 @@ done
 echo ""
 echo "--- Denied tag operations ---"
 
-git tag test-tag-$(date +%s) 2>/dev/null
+git tag "test-tag-$(date +%s)" 2>/dev/null
 expect_failure "Create tag" git push origin --tags
 
 # --- Section 5: Force push / delete protected ref (denied) ---

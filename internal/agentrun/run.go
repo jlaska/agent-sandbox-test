@@ -42,8 +42,8 @@ func Run(cfg *Config) error {
 
 	// State for cleanup
 	var (
-		sandboxName    string
-		mintedToken    string
+		sandboxName      string
+		mintedToken      string
 		providersCreated []string
 	)
 
@@ -219,7 +219,6 @@ func Run(cfg *Config) error {
 
 	return nil
 }
-
 
 // waitForSandbox waits for a sandbox to become ready.
 func waitForSandbox(name string) error {
