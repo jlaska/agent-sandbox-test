@@ -58,6 +58,7 @@ GIT_EMAIL="jlaska-agent[bot]@users.noreply.github.com"
 
 APPROVED_REPOS=(
     "jlaska/agent-sandbox-test"
+    "jlaska/homelab"
 )
 
 # --- Harness definitions ---

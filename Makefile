@@ -19,8 +19,12 @@ BUILD_DIR := ./bin
 ## all: Build the binary
 all: build
 
+GO_SOURCES := $(shell find $(SRC_DIR) $(PKG_DIR) -name '*.go' 2>/dev/null)
+
 ## build: Build the agent-run binary
-build:
+build: $(BUILD_DIR)/$(BINARY_NAME)
+
+$(BUILD_DIR)/$(BINARY_NAME): $(GO_SOURCES) go.mod
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)
