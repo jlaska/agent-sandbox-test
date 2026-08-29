@@ -87,7 +87,7 @@ func setupProviderLiteLLM(harness string, useMax bool) (string, []string, []stri
 		envFlags = append(envFlags,
 			"--env", "ANTHROPIC_API_KEY=__LITELLM_PLACEHOLDER__",
 			"--env", fmt.Sprintf("ANTHROPIC_BASE_URL=%s", baseURL),
-			"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0",
+			"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 		)
 		if useMax {
 			if bearerToken == "" {
@@ -160,7 +160,7 @@ func setupProviderVertex(harness string, useMax bool) (string, []string, []strin
 		"--env", "CLAUDE_CODE_USE_VERTEX=1",
 		"--env", fmt.Sprintf("ANTHROPIC_VERTEX_PROJECT_ID=%s", projectID),
 		"--env", "CLOUD_ML_REGION=global",
-		"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0",
+		"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 	)
 
 	return "setup_sandbox_vertex", providers, envFlags, nil
