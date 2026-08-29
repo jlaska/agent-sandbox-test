@@ -32,8 +32,8 @@ red()   { printf '\033[1;31m%s\033[0m\n' "$*"; }
 green() { printf '\033[1;32m%s\033[0m\n' "$*"; }
 yellow(){ printf '\033[1;33m%s\033[0m\n' "$*"; }
 
-record_pass() { green "  PASS: $1"; ((PASS++)); }
-record_fail() { red   "  FAIL: $1"; ((ERRORS++)); }
+record_pass() { green "  PASS: $1"; PASS=$((PASS + 1)); }
+record_fail() { red   "  FAIL: $1"; ERRORS=$((ERRORS + 1)); }
 record_skip() { yellow "  SKIP: $1"; }
 
 # expect_success: command should succeed
@@ -73,11 +73,12 @@ if git clone "https://github.com/${REPO}.git" "$CLONE_DIR/repo" 2>/dev/null; the
     record_pass "Clone approved repository via HTTPS"
     cd "$CLONE_DIR/repo"
 
-    # Configure sandbox-local identity
+    # Configure sandbox-local identity and credential helper
     git config user.name "jlaska-agent[bot]"
     git config user.email "jlaska-agent[bot]@users.noreply.github.com"
     git config commit.gpgsign false
     git config tag.gpgsign false
+    git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN}"; }; f'
 else
     record_fail "Clone approved repository via HTTPS"
     echo "Cannot continue without a clone. Exiting."
