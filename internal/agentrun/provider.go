@@ -55,7 +55,7 @@ func setupProviderLiteLLM(harness string, useMax bool) (string, []string, []stri
 	}
 
 	// Create litellm-inference provider
-	execCmd("openshell", "provider", "delete", "litellm-inference")
+	_ = execCmd("openshell", "provider", "delete", "litellm-inference")
 	if err := execCmd("openshell", "provider", "create",
 		"--name", "litellm-inference",
 		"--type", "litellm-inference",
@@ -69,7 +69,7 @@ func setupProviderLiteLLM(harness string, useMax bool) (string, []string, []stri
 
 	// Claude Code also requires builtin claude-code provider
 	if harness == HarnessClaude {
-		execCmd("openshell", "provider", "delete", "claude-code")
+		_ = execCmd("openshell", "provider", "delete", "claude-code")
 		if err := execCmd("openshell", "provider", "create",
 			"--name", "claude-code",
 			"--type", "claude-code",
@@ -111,7 +111,7 @@ func setupProviderVertex(harness string, useMax bool) (string, []string, []strin
 	fmt.Println("[agent-run] Inference provider: vertex")
 
 	if harness != HarnessClaude {
-		return "", nil, nil, fmt.Errorf("Vertex AI provider only supports the claude harness")
+		return "", nil, nil, fmt.Errorf("vertex AI provider only supports the claude harness")
 	}
 	if useMax {
 		return "", nil, nil, fmt.Errorf("--max is only valid with --provider litellm")
@@ -132,7 +132,7 @@ func setupProviderVertex(harness string, useMax bool) (string, []string, []strin
 	projectID := keychainGet("anthropic-vertex-project-id")
 
 	// Create vertex-ai provider
-	execCmd("openshell", "provider", "delete", "vertex-ai")
+	_ = execCmd("openshell", "provider", "delete", "vertex-ai")
 	if err := execCmd("openshell", "provider", "create",
 		"--name", "vertex-ai",
 		"--type", "google-vertex-ai",
@@ -144,7 +144,7 @@ func setupProviderVertex(harness string, useMax bool) (string, []string, []strin
 	envFlags := []string{"--provider", "vertex-ai"}
 
 	// Claude Code still requires builtin provider
-	execCmd("openshell", "provider", "delete", "claude-code")
+	_ = execCmd("openshell", "provider", "delete", "claude-code")
 	if err := execCmd("openshell", "provider", "create",
 		"--name", "claude-code",
 		"--type", "claude-code",
@@ -189,7 +189,7 @@ func setupProviderAPI(harness string, useMax bool) (string, []string, []string, 
 	}
 
 	// Create claude-code provider
-	execCmd("openshell", "provider", "delete", "claude-code")
+	_ = execCmd("openshell", "provider", "delete", "claude-code")
 	if err := execCmd("openshell", "provider", "create",
 		"--name", "claude-code",
 		"--type", "claude-code",
@@ -261,13 +261,13 @@ func generatePolicy(repo, scriptDir string) (string, error) {
 	}
 
 	if _, err := tmpfile.WriteString(updated); err != nil {
-		tmpfile.Close()
-		os.Remove(tmpfile.Name())
+		_ = tmpfile.Close()
+		_ = os.Remove(tmpfile.Name())
 		return "", fmt.Errorf("failed to write policy file: %w", err)
 	}
 
 	if err := tmpfile.Close(); err != nil {
-		os.Remove(tmpfile.Name())
+		_ = os.Remove(tmpfile.Name())
 		return "", err
 	}
 
