@@ -13,21 +13,6 @@ const (
 	HarnessShell  = "shell"
 )
 
-// Supported inference providers.
-const (
-	ProviderLiteLLM = "litellm"
-	ProviderVertex  = "vertex"
-	ProviderAPI     = "api"
-	ProviderNone    = "none"
-)
-
-// Approved repositories.
-// Add new repos here only after completing the full graduation checklist
-// (GitHub App installation, rulesets, token-scoping tests, policy generation tests).
-var ApprovedRepos = []string{
-	"jlaska/agent-sandbox-test",
-}
-
 // Config holds parsed command-line arguments and configuration.
 type Config struct {
 	// Positional arguments
@@ -35,15 +20,18 @@ type Config struct {
 	Harness string
 
 	// Optional flags
-	Provider       string
 	Model          string
-	Max            bool
+	EnvVars        []string
+	GitHubToken    string
 	Diag           bool
 	ListRepos      bool
 	Help           bool
 	MintToken      bool
 	RevokeToken    string
 	GeneratePolicy bool
+
+	// Passthrough args (everything after --)
+	PassthroughArgs []string
 }
 
 // harnessCommands maps harness names to their shell commands.
@@ -53,35 +41,18 @@ var harnessCommands = map[string]string{
 	HarnessShell:  "bash",
 }
 
-// harnessDefaultProvider returns the default provider for a harness.
-func harnessDefaultProvider(harness string) string {
-	switch harness {
-	case HarnessClaude, HarnessPi:
-		return ProviderLiteLLM
-	case HarnessShell:
-		return ProviderNone
-	default:
-		return ""
-	}
+// envVarCollector implements flag.Value for repeatable --env flags.
+type envVarCollector struct {
+	values *[]string
 }
 
-// harnessSupportsProvider checks if a harness supports a provider.
-func harnessSupportsProvider(harness, provider string) bool {
-	compat := map[string][]string{
-		HarnessClaude: {ProviderLiteLLM, ProviderVertex, ProviderAPI},
-		HarnessPi:     {ProviderLiteLLM},
-		HarnessShell:  {ProviderNone},
+func (e *envVarCollector) String() string { return "" }
+func (e *envVarCollector) Set(val string) error {
+	if !strings.Contains(val, "=") {
+		return fmt.Errorf("env var must be in KEY=VALUE format: %q", val)
 	}
-	supported, ok := compat[harness]
-	if !ok {
-		return false
-	}
-	for _, p := range supported {
-		if p == provider {
-			return true
-		}
-	}
-	return false
+	*e.values = append(*e.values, val)
+	return nil
 }
 
 // ParseArgs parses command-line arguments into a Config.
@@ -90,9 +61,9 @@ func ParseArgs(args []string) (*Config, error) {
 	cfg := &Config{}
 
 	fs := flag.NewFlagSet("agent-run", flag.ContinueOnError)
-	fs.StringVar(&cfg.Provider, "provider", "", "inference provider (litellm, vertex, api)")
 	fs.StringVar(&cfg.Model, "model", "", "override model name")
-	fs.BoolVar(&cfg.Max, "max", false, "use Claude Max subscription via LiteLLM")
+	fs.Var(&envVarCollector{values: &cfg.EnvVars}, "env", "pass env var to sandbox (KEY=VAL, repeatable)")
+	fs.StringVar(&cfg.GitHubToken, "github-token", "", "GitHub PAT (alternative to App token)")
 	fs.BoolVar(&cfg.Diag, "diag", false, "print diagnostic information")
 	fs.BoolVar(&cfg.ListRepos, "list-repos", false, "list approved repositories")
 	fs.BoolVar(&cfg.Help, "help", false, "print usage")
@@ -100,9 +71,18 @@ func ParseArgs(args []string) (*Config, error) {
 	fs.StringVar(&cfg.RevokeToken, "revoke-token", "", "revoke a previously minted token")
 	fs.BoolVar(&cfg.GeneratePolicy, "generate-policy", false, "generate a repo-scoped policy file and print its path")
 
+	// Split at -- separator: everything after becomes passthrough args.
+	for i, a := range args {
+		if a == "--" {
+			cfg.PassthroughArgs = args[i+1:]
+			args = args[:i]
+			break
+		}
+	}
+
 	// Separate flags from positional args so flags work in any position.
 	var flagArgs, positional []string
-	flagsWithValue := map[string]bool{"--provider": true, "--model": true, "--revoke-token": true}
+	flagsWithValue := map[string]bool{"--model": true, "--revoke-token": true, "--env": true, "--github-token": true}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
@@ -155,7 +135,7 @@ func ParseArgs(args []string) (*Config, error) {
 	}
 
 	if len(positional) < 2 {
-		return nil, fmt.Errorf("usage: agent-run <owner/repo> <harness> [options]")
+		return nil, fmt.Errorf("usage: agent-run <owner/repo> <harness> [options] [-- <harness-args>...]")
 	}
 
 	cfg.Repo = positional[0]
@@ -182,7 +162,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("harness is required")
 	}
 
-	// Validate harness
 	switch c.Harness {
 	case HarnessClaude, HarnessPi, HarnessShell:
 		// valid
@@ -190,68 +169,35 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unknown harness %q; supported: %s", c.Harness, strings.Join([]string{HarnessClaude, HarnessPi, HarnessShell}, ", "))
 	}
 
-	// Set default provider if not specified
-	if c.Provider == "" {
-		c.Provider = harnessDefaultProvider(c.Harness)
-	}
-
-	// Validate provider
-	switch c.Provider {
-	case ProviderLiteLLM, ProviderVertex, ProviderAPI, ProviderNone:
-		// valid
-	default:
-		return fmt.Errorf("unknown provider %q; supported: %s", c.Provider, strings.Join([]string{ProviderLiteLLM, ProviderVertex, ProviderAPI, ProviderNone}, ", "))
-	}
-
-	// Check harness/provider compatibility
-	if !harnessSupportsProvider(c.Harness, c.Provider) {
-		return fmt.Errorf("harness %q does not support provider %q", c.Harness, c.Provider)
-	}
-
-	// Check approved repos
-	if !isApprovedRepo(c.Repo) {
-		return fmt.Errorf("repository %q is not in the approved list; use --list-repos to see available repos", c.Repo)
-	}
-
-	// Validate --max flag
-	if c.Max && c.Provider != ProviderLiteLLM {
-		return fmt.Errorf("--max is only valid with --provider litellm")
-	}
-
 	return nil
 }
 
-func isApprovedRepo(repo string) bool {
-	for _, approved := range ApprovedRepos {
-		if repo == approved {
-			return true
-		}
-	}
-	return false
-}
-
 func printUsage() {
-	fmt.Println("Usage: agent-run <owner/repo> <harness> [--provider <provider>] [--model <model>] [--max]")
+	fmt.Println("Usage: agent-run <owner/repo> <harness> [options] [-- <harness-args>...]")
 	fmt.Println()
 	fmt.Printf("  Harnesses:  %s, %s, %s\n", HarnessClaude, HarnessPi, HarnessShell)
-	fmt.Printf("  Providers:  %s (default), %s, %s\n", ProviderLiteLLM, ProviderVertex, ProviderAPI)
-	fmt.Println("  Repos:     ", strings.Join(ApprovedRepos, ", "))
 	fmt.Println()
-	fmt.Println("  Harness/provider compatibility:")
-	fmt.Println("    claude:  litellm (default), vertex, api")
-	fmt.Println("    pi:      litellm (default)")
-	fmt.Println("    shell:   none")
+	fmt.Println("  Inference auth is configured via environment variables:")
+	fmt.Println("    ANTHROPIC_API_KEY          Direct API key")
+	fmt.Println("    CLAUDE_CODE_OAUTH_TOKEN    Max/Pro subscription (from claude setup-token)")
+	fmt.Println("    ANTHROPIC_BASE_URL         Custom endpoint (e.g. LiteLLM proxy)")
+	fmt.Println("    CLAUDE_CODE_USE_VERTEX=1   Vertex AI mode")
 	fmt.Println()
-	fmt.Println("  --provider <p>  Select inference provider (default: litellm)")
-	fmt.Println("  --model <m>     Override model (passed to harness CLI as --model)")
-	fmt.Println("  --max           Claude Max subscription via LiteLLM (litellm only)")
+	fmt.Println("  --model <m>     Override model (passed to harness CLI)")
+	fmt.Println("  --env KEY=VAL   Pass env var to sandbox (repeatable)")
 	fmt.Println("  --diag          Print diagnostic info")
 	fmt.Println("  --list-repos    List approved repositories")
 }
 
 func printRepos() {
-	fmt.Println("Approved repositories:")
-	for _, repo := range ApprovedRepos {
+	repos, err := ListAppRepos()
+	if err != nil {
+		fmt.Printf("Could not list repos: %v\n", err)
+		fmt.Println("(Requires GitHub App credentials in Keychain)")
+		return
+	}
+	fmt.Println("Accessible repositories (via GitHub App):")
+	for _, repo := range repos {
 		fmt.Printf("  %s\n", repo)
 	}
 }

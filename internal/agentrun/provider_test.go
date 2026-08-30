@@ -1,16 +1,15 @@
 package agentrun
 
 import (
-	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
 
 // mockCmd records calls and returns a configurable error.
 type mockCmd struct {
-	calls [][]string
-	err   error
+	calls      [][]string
+	err        error
+	execOutput func(string, ...string) (string, error)
 }
 
 func (m *mockCmd) exec(name string, args ...string) error {
@@ -18,8 +17,11 @@ func (m *mockCmd) exec(name string, args ...string) error {
 	return m.err
 }
 
-func (m *mockCmd) execOutput(name string, args ...string) (string, error) {
+func (m *mockCmd) defaultExecOutput(name string, args ...string) (string, error) {
 	m.calls = append(m.calls, append([]string{name}, args...))
+	if m.execOutput != nil {
+		return m.execOutput(name, args...)
+	}
 	return "", m.err
 }
 
@@ -37,329 +39,220 @@ func withMockExec(t *testing.T, fn func(mock *mockCmd)) {
 	m := &mockCmd{}
 	execCmdFn = m.exec
 	execCmdSilentFn = m.exec
-	execCmdOutputFn = m.execOutput
+	execCmdOutputFn = m.defaultExecOutput
 	fn(m)
 }
 
-// withMockKeychain sets up mock keychain responses for testing.
-type keychainMock struct {
-	values map[string]string
-}
+func TestResolveInferenceEnv(t *testing.T) {
+	t.Run("auto-forwards config vars from host", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_BASE_URL", "https://example.com")
+		t.Setenv("CLAUDE_CODE_USE_VERTEX", "1")
 
-func withMockKeychain(t *testing.T, values map[string]string, fn func()) {
-	t.Helper()
-	origCmd := execCmdFn
-	origSilent := execCmdSilentFn
-	origOutput := execCmdOutputFn
-	defer func() {
-		execCmdFn = origCmd
-		execCmdSilentFn = origSilent
-		execCmdOutputFn = origOutput
-	}()
+		flags := resolveInferenceEnv(HarnessClaude, nil)
 
-	km := &keychainMock{values: values}
-
-	mockExec := func(name string, args ...string) error {
-		if name == "security" && len(args) >= 4 && args[0] == "find-generic-password" {
-			svc := ""
-			for i, a := range args {
-				if a == "-s" && i+1 < len(args) {
-					svc = args[i+1]
-				}
+		found := map[string]bool{}
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" {
+				k, _, _ := strings.Cut(flags[i+1], "=")
+				found[k] = true
 			}
-			if _, ok := km.values[svc]; ok {
-				return nil
-			}
-			return fmt.Errorf("not found")
 		}
-		return nil
-	}
-
-	mockOutput := func(name string, args ...string) (string, error) {
-		if name == "security" && len(args) >= 4 && args[0] == "find-generic-password" {
-			svc := ""
-			for i, a := range args {
-				if a == "-s" && i+1 < len(args) {
-					svc = args[i+1]
-				}
-			}
-			if v, ok := km.values[svc]; ok {
-				return v, nil
-			}
-			return "", fmt.Errorf("not found")
+		if !found["ANTHROPIC_BASE_URL"] {
+			t.Error("expected ANTHROPIC_BASE_URL to be forwarded")
 		}
-		if name == "openshell" && len(args) > 0 && args[0] == "provider" {
-			return "litellm-inference\n", nil
+		if !found["CLAUDE_CODE_USE_VERTEX"] {
+			t.Error("expected CLAUDE_CODE_USE_VERTEX to be forwarded")
 		}
-		return "", nil
-	}
-
-	execCmdFn = mockExec
-	execCmdSilentFn = mockExec
-	execCmdOutputFn = mockOutput
-	fn()
-}
-
-func TestSetupProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		harness  string
-		max      bool
-		wantHook string
-		wantErr  bool
-	}{
-		{
-			name:     "unknown provider",
-			provider: "unknown",
-			harness:  "claude",
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			withMockExec(t, func(mock *mockCmd) {
-				hook, _, _, err := setupProvider(tt.provider, tt.harness, tt.max)
-				if (err != nil) != tt.wantErr {
-					t.Errorf("setupProvider() error = %v, wantErr %v", err, tt.wantErr)
-					return
-				}
-				if !tt.wantErr && hook != tt.wantHook {
-					t.Errorf("setupProvider() hook = %v, want %v", hook, tt.wantHook)
-				}
-			})
-		})
-	}
-}
-
-func TestSetupProviderLiteLLM(t *testing.T) {
-	t.Run("missing litellm-api-key", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{}, func() {
-			_, _, _, err := setupProviderLiteLLM("claude", false)
-			if err == nil || !strings.Contains(err.Error(), "litellm-api-key") {
-				t.Errorf("expected litellm-api-key error, got %v", err)
-			}
-		})
 	})
 
-	t.Run("missing anthropic-base-url", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key": "test-key",
-		}, func() {
-			_, _, _, err := setupProviderLiteLLM("claude", false)
-			if err == nil || !strings.Contains(err.Error(), "anthropic-base-url") {
-				t.Errorf("expected anthropic-base-url error, got %v", err)
+	t.Run("credential vars excluded from env forwarding", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+		t.Setenv("ANTHROPIC_BASE_URL", "https://example.com")
+
+		flags := resolveInferenceEnv(HarnessClaude, nil)
+
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" && strings.HasPrefix(flags[i+1], "ANTHROPIC_API_KEY=") {
+				t.Error("ANTHROPIC_API_KEY should NOT be forwarded as --env (it goes through provider)")
 			}
-		})
+		}
 	})
 
-	t.Run("claude with max but no bearer token", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key":    "test-key",
-			"anthropic-base-url": "https://test.example.com",
-		}, func() {
-			_, _, _, err := setupProviderLiteLLM("claude", true)
-			if err == nil || !strings.Contains(err.Error(), "litellm-bearer-token") {
-				t.Errorf("expected bearer-token error, got %v", err)
+	t.Run("explicit credential env redirected to provider", func(t *testing.T) {
+		flags := resolveInferenceEnv(HarnessClaude, []string{"ANTHROPIC_API_KEY=sk-explicit"})
+
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" && strings.HasPrefix(flags[i+1], "ANTHROPIC_API_KEY=") {
+				t.Error("explicit ANTHROPIC_API_KEY should be redirected to provider, not --env")
 			}
-		})
+		}
 	})
 
-	t.Run("claude success", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key":    "test-key",
-			"anthropic-base-url": "https://test.example.com",
-		}, func() {
-			hook, providers, envFlags, err := setupProviderLiteLLM("claude", false)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+	t.Run("explicit config env forwarded", func(t *testing.T) {
+		flags := resolveInferenceEnv(HarnessClaude, []string{"ANTHROPIC_BASE_URL=https://custom.com"})
+
+		found := false
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" && flags[i+1] == "ANTHROPIC_BASE_URL=https://custom.com" {
+				found = true
 			}
-			if hook != "setup_sandbox_litellm" {
-				t.Errorf("hook = %v, want setup_sandbox_litellm", hook)
-			}
-			if len(providers) != 2 {
-				t.Errorf("expected 2 providers (litellm-inference, claude-code), got %d", len(providers))
-			}
-			hasBaseURL := false
-			for _, f := range envFlags {
-				if strings.Contains(f, "ANTHROPIC_BASE_URL") {
-					hasBaseURL = true
+		}
+		if !found {
+			t.Error("explicit config env should be forwarded")
+		}
+	})
+
+	t.Run("unset host vars not forwarded", func(t *testing.T) {
+		for _, key := range inferenceConfigVars[HarnessClaude] {
+			t.Setenv(key, "")
+		}
+
+		flags := resolveInferenceEnv(HarnessClaude, nil)
+		if len(flags) != 0 {
+			t.Errorf("expected no flags when no env vars set, got %v", flags)
+		}
+	})
+
+	t.Run("pi forwards config vars only", func(t *testing.T) {
+		t.Setenv("LITELLM_API_KEY", "sk-litellm")
+		t.Setenv("LITELLM_BASE_URL", "https://litellm.example.com")
+
+		flags := resolveInferenceEnv(HarnessPi, nil)
+
+		foundBaseURL := false
+		foundAPIKey := false
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" {
+				k, _, _ := strings.Cut(flags[i+1], "=")
+				if k == "LITELLM_BASE_URL" {
+					foundBaseURL = true
+				}
+				if k == "LITELLM_API_KEY" {
+					foundAPIKey = true
 				}
 			}
-			if !hasBaseURL {
-				t.Error("missing ANTHROPIC_BASE_URL in envFlags")
-			}
-		})
+		}
+		if !foundBaseURL {
+			t.Error("expected LITELLM_BASE_URL forwarded for pi")
+		}
+		if foundAPIKey {
+			t.Error("LITELLM_API_KEY should NOT be forwarded as --env for pi")
+		}
 	})
 
-	t.Run("pi success", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key":    "test-key",
-			"anthropic-base-url": "https://test.example.com",
-		}, func() {
-			_, providers, envFlags, err := setupProviderLiteLLM("pi", false)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(providers) != 1 {
-				t.Errorf("expected 1 provider (litellm-inference), got %d", len(providers))
-			}
-			hasLiteLLMURL := false
-			for _, f := range envFlags {
-				if strings.Contains(f, "LITELLM_BASE_URL") {
-					hasLiteLLMURL = true
-				}
-			}
-			if !hasLiteLLMURL {
-				t.Error("missing LITELLM_BASE_URL in envFlags")
-			}
-		})
-	})
+	t.Run("shell harness forwards nothing", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	t.Run("claude with max success", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key":      "test-key",
-			"anthropic-base-url":   "https://test.example.com",
-			"litellm-bearer-token": "bearer-val",
-		}, func() {
-			_, _, envFlags, err := setupProviderLiteLLM("claude", true)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			hasCustomHeader := false
-			for _, f := range envFlags {
-				if strings.Contains(f, "ANTHROPIC_CUSTOM_HEADERS") {
-					hasCustomHeader = true
-				}
-			}
-			if !hasCustomHeader {
-				t.Error("missing ANTHROPIC_CUSTOM_HEADERS in envFlags for --max")
-			}
-		})
+		flags := resolveInferenceEnv(HarnessShell, nil)
+		if len(flags) != 0 {
+			t.Errorf("expected no auto-forward for shell, got %v", flags)
+		}
 	})
 }
 
-func TestSetupProviderVertex(t *testing.T) {
-	t.Run("non-claude harness rejected", func(t *testing.T) {
-		withMockExec(t, func(_ *mockCmd) {
-			_, _, _, err := setupProviderVertex("pi", false)
-			if err == nil || !strings.Contains(err.Error(), "only supports the claude harness") {
-				t.Errorf("expected harness error, got %v", err)
-			}
-		})
+func TestResolveCredential(t *testing.T) {
+	t.Run("from explicit env", func(t *testing.T) {
+		val := resolveCredential("MY_KEY", []string{"MY_KEY=explicit"})
+		if val != "explicit" {
+			t.Errorf("got %q, want explicit", val)
+		}
 	})
 
-	t.Run("max rejected", func(t *testing.T) {
-		withMockExec(t, func(_ *mockCmd) {
-			_, _, _, err := setupProviderVertex("claude", true)
-			if err == nil || !strings.Contains(err.Error(), "--max") {
-				t.Errorf("expected max error, got %v", err)
-			}
-		})
+	t.Run("from host env", func(t *testing.T) {
+		t.Setenv("MY_KEY", "from-host")
+		val := resolveCredential("MY_KEY", nil)
+		if val != "from-host" {
+			t.Errorf("got %q, want from-host", val)
+		}
 	})
 
-	t.Run("missing ADC", func(t *testing.T) {
-		withMockExec(t, func(_ *mockCmd) {
-			origHome := os.Getenv("HOME")
-			t.Setenv("HOME", t.TempDir())
-			defer func() { _ = os.Setenv("HOME", origHome) }()
-			_, _, _, err := setupProviderVertex("claude", false)
-			if err == nil || !strings.Contains(err.Error(), "gcloud ADC") {
-				t.Errorf("expected ADC error, got %v", err)
-			}
-		})
+	t.Run("explicit wins over host", func(t *testing.T) {
+		t.Setenv("MY_KEY", "from-host")
+		val := resolveCredential("MY_KEY", []string{"MY_KEY=explicit"})
+		if val != "explicit" {
+			t.Errorf("got %q, want explicit", val)
+		}
+	})
+
+	t.Run("missing returns empty", func(t *testing.T) {
+		val := resolveCredential("NONEXISTENT_KEY", nil)
+		if val != "" {
+			t.Errorf("got %q, want empty", val)
+		}
 	})
 }
 
-func TestSetupProviderAPI(t *testing.T) {
-	t.Run("non-claude harness rejected", func(t *testing.T) {
-		withMockExec(t, func(_ *mockCmd) {
-			_, _, _, err := setupProviderAPI("pi", false)
-			if err == nil || !strings.Contains(err.Error(), "only supports the claude harness") {
-				t.Errorf("expected harness error, got %v", err)
-			}
-		})
-	})
-
-	t.Run("max rejected", func(t *testing.T) {
-		withMockExec(t, func(_ *mockCmd) {
-			_, _, _, err := setupProviderAPI("claude", true)
-			if err == nil || !strings.Contains(err.Error(), "--max") {
-				t.Errorf("expected max error, got %v", err)
-			}
-		})
-	})
-
-	t.Run("missing credentials", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{}, func() {
-			_, _, _, err := setupProviderAPI("claude", false)
-			if err == nil || !strings.Contains(err.Error(), "missing Keychain") {
-				t.Errorf("expected missing keychain error, got %v", err)
-			}
-		})
-	})
-
-	t.Run("success with direct key", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"anthropic-api-key-direct": "sk-test",
-		}, func() {
-			hook, providers, _, err := setupProviderAPI("claude", false)
+func TestCreateInferenceProviders(t *testing.T) {
+	t.Run("claude creates claude-code provider", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+			flags, names, err := createInferenceProviders(HarnessClaude, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if hook != "setup_sandbox_api" {
-				t.Errorf("hook = %v, want setup_sandbox_api", hook)
+			if len(names) != 1 || names[0] != "claude-code" {
+				t.Errorf("names = %v, want [claude-code]", names)
 			}
-			if len(providers) != 1 || providers[0] != "claude-code" {
-				t.Errorf("providers = %v, want [claude-code]", providers)
+			if len(flags) != 2 || flags[0] != "--provider" || flags[1] != "claude-code" {
+				t.Errorf("flags = %v, want [--provider claude-code]", flags)
 			}
 		})
 	})
 
-	t.Run("fallback to litellm key", func(t *testing.T) {
-		withMockKeychain(t, map[string]string{
-			"litellm-api-key": "sk-fallback",
-		}, func() {
-			_, providers, _, err := setupProviderAPI("claude", false)
+	t.Run("pi creates litellm-inference provider", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			mock.execOutput = func(name string, args ...string) (string, error) {
+				if name == "openshell" && len(args) > 0 && args[0] == "provider" {
+					return "litellm-inference\n", nil
+				}
+				return "", nil
+			}
+			execCmdOutputFn = mock.execOutput
+
+			t.Setenv("LITELLM_API_KEY", "sk-litellm")
+			flags, names, err := createInferenceProviders(HarnessPi, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(providers) != 1 || providers[0] != "claude-code" {
-				t.Errorf("providers = %v, want [claude-code]", providers)
+			if len(names) != 1 || names[0] != "litellm-inference" {
+				t.Errorf("names = %v, want [litellm-inference]", names)
+			}
+			if len(flags) != 2 || flags[0] != "--provider" || flags[1] != "litellm-inference" {
+				t.Errorf("flags = %v, want [--provider litellm-inference]", flags)
+			}
+		})
+	})
+
+	t.Run("pi errors without LITELLM_API_KEY", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			t.Setenv("LITELLM_API_KEY", "")
+			_, _, err := createInferenceProviders(HarnessPi, nil)
+			if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY") {
+				t.Errorf("expected LITELLM_API_KEY error, got %v", err)
+			}
+		})
+	})
+
+	t.Run("shell creates no providers", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			flags, names, err := createInferenceProviders(HarnessShell, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(names) != 0 {
+				t.Errorf("expected no providers for shell, got %v", names)
+			}
+			if len(flags) != 0 {
+				t.Errorf("expected no flags for shell, got %v", flags)
 			}
 		})
 	})
 }
 
 func TestRunSandboxInitHook(t *testing.T) {
-	tests := []struct {
-		name    string
-		hook    string
-		wantErr bool
-	}{
-		{"litellm hook", "setup_sandbox_litellm", false},
-		{"vertex hook", "setup_sandbox_vertex", false},
-		{"api hook", "setup_sandbox_api", false},
-		{"unknown hook", "unknown", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			withMockExec(t, func(_ *mockCmd) {
-				err := runSandboxInitHook(tt.hook, "claude", "test-sandbox")
-				if (err != nil) != tt.wantErr {
-					t.Errorf("runSandboxInitHook() error = %v, wantErr %v", err, tt.wantErr)
-				}
-			})
-		})
-	}
-}
-
-func TestSetupSandboxLiteLLM(t *testing.T) {
-	t.Run("claude configures ANTHROPIC_API_KEY", func(t *testing.T) {
+	t.Run("claude maps ANTHROPIC_API_KEY", func(t *testing.T) {
 		withMockExec(t, func(mock *mockCmd) {
-			err := setupSandboxLiteLLM("claude", "test-sb")
+			err := runSandboxInitHook("claude", "test-sb")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -368,27 +261,41 @@ func TestSetupSandboxLiteLLM(t *testing.T) {
 			}
 			cmd := strings.Join(mock.calls[0], " ")
 			if !strings.Contains(cmd, "ANTHROPIC_API_KEY") {
-				t.Error("expected ANTHROPIC_API_KEY in sandbox init")
+				t.Error("expected ANTHROPIC_API_KEY in init hook")
 			}
 		})
 	})
 
-	t.Run("pi configures LITELLM_API_KEY", func(t *testing.T) {
+	t.Run("claude maps CLAUDE_CODE_OAUTH_TOKEN when set", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 		withMockExec(t, func(mock *mockCmd) {
-			err := setupSandboxLiteLLM("pi", "test-sb")
+			err := runSandboxInitHook("claude", "test-sb")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			cmd := strings.Join(mock.calls[0], " ")
+			if !strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") {
+				t.Error("expected CLAUDE_CODE_OAUTH_TOKEN in init hook")
+			}
+		})
+	})
+
+	t.Run("pi maps LITELLM_API_KEY", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			err := runSandboxInitHook("pi", "test-sb")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			cmd := strings.Join(mock.calls[0], " ")
 			if !strings.Contains(cmd, "LITELLM_API_KEY") {
-				t.Error("expected LITELLM_API_KEY in sandbox init")
+				t.Error("expected LITELLM_API_KEY in init hook")
 			}
 		})
 	})
 
 	t.Run("shell is noop", func(t *testing.T) {
 		withMockExec(t, func(mock *mockCmd) {
-			err := setupSandboxLiteLLM("shell", "test-sb")
+			err := runSandboxInitHook("shell", "test-sb")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -396,31 +303,6 @@ func TestSetupSandboxLiteLLM(t *testing.T) {
 				t.Errorf("expected 0 calls for shell, got %d", len(mock.calls))
 			}
 		})
-	})
-}
-
-func TestSetupSandboxVertex(t *testing.T) {
-	withMockExec(t, func(_ *mockCmd) {
-		err := setupSandboxVertex("claude", "test-sb")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func TestSetupSandboxAPI(t *testing.T) {
-	withMockExec(t, func(mock *mockCmd) {
-		err := setupSandboxAPI("claude", "test-sb")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(mock.calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(mock.calls))
-		}
-		cmd := strings.Join(mock.calls[0], " ")
-		if !strings.Contains(cmd, "ANTHROPIC_API_KEY") {
-			t.Error("expected ANTHROPIC_API_KEY in sandbox init")
-		}
 	})
 }
 
@@ -462,20 +344,25 @@ func TestInstallHarness(t *testing.T) {
 	})
 }
 
-func TestOrDefault(t *testing.T) {
+func TestShellQuote(t *testing.T) {
 	tests := []struct {
-		s, def, want string
+		input string
+		want  string
 	}{
-		{"value", "default", "value"},
-		{"", "default", "default"},
-		{"", "", ""},
+		{"hello", "'hello'"},
+		{"fix the bug", "'fix the bug'"},
+		{"it's a test", `'it'\''s a test'`},
+		{"", "''"},
+		{"--model=opus", "'--model=opus'"},
 	}
 
 	for _, tt := range tests {
-		got := orDefault(tt.s, tt.def)
-		if got != tt.want {
-			t.Errorf("orDefault(%q, %q) = %q, want %q", tt.s, tt.def, got, tt.want)
-		}
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

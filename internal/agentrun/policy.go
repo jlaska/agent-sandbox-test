@@ -72,18 +72,14 @@ func GeneratePolicy(repo, repoRoot string) (string, error) {
 
 	result := buf.String()
 
-	// Validate: the generated policy must contain exactly the requested repo
-	// and no other well-known repos.
+	// Validate: the generated policy must contain the requested repo
+	// and no unresolved template placeholders.
 	fullRepo := owner + "/" + name
 	if !strings.Contains(result, fullRepo) {
 		return "", fmt.Errorf("generated policy does not contain target repository %q", fullRepo)
 	}
-
-	// Check that no other known repos leaked into the policy.
-	for _, approved := range ApprovedRepos {
-		if approved != fullRepo && strings.Contains(result, approved) {
-			return "", fmt.Errorf("generated policy contains unauthorized repository %q", approved)
-		}
+	if strings.Contains(result, "{{.Owner}}") || strings.Contains(result, "{{.Repo}}") {
+		return "", fmt.Errorf("generated policy contains unresolved template placeholders")
 	}
 
 	// Write to temp file

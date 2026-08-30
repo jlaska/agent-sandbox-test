@@ -7,221 +7,161 @@ import (
 	"strings"
 )
 
-// setupProvider configures an inference provider and returns:
-// - sandbox init hook name (if any)
-// - provider names to track for cleanup
-// - environment flags for sandbox creation
-func setupProvider(provider, harness string, useMax bool) (hook string, providers []string, envFlags []string, err error) {
-	switch provider {
-	case ProviderLiteLLM:
-		return setupProviderLiteLLM(harness, useMax)
-	case ProviderVertex:
-		return setupProviderVertex(harness, useMax)
-	case ProviderAPI:
-		return setupProviderAPI(harness, useMax)
-	default:
-		return "", nil, nil, fmt.Errorf("unknown provider: %s", provider)
-	}
+// Known inference env vars to auto-forward from the host environment.
+// Split into credentials (injected via OpenShell provider, secure) and
+// config (injected via --env, visible to the agent).
+var inferenceCredentialVars = map[string][]string{
+	HarnessClaude: {
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_AUTH_TOKEN",
+		"CLAUDE_CODE_OAUTH_TOKEN",
+	},
+	HarnessPi: {
+		"LITELLM_API_KEY",
+	},
 }
 
-func setupProviderLiteLLM(harness string, useMax bool) (string, []string, []string, error) {
-	fmt.Println("[agent-run] Inference provider: litellm")
+var inferenceConfigVars = map[string][]string{
+	HarnessClaude: {
+		"ANTHROPIC_BASE_URL",
+		"CLAUDE_CODE_USE_VERTEX",
+		"ANTHROPIC_VERTEX_PROJECT_ID",
+		"CLOUD_ML_REGION",
+		"ANTHROPIC_CUSTOM_HEADERS",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+	},
+	HarnessPi: {
+		"LITELLM_BASE_URL",
+		"ANTHROPIC_BASE_URL",
+	},
+}
 
-	// Check keychain credentials
-	if !keychainExists("litellm-api-key") {
-		return "", nil, nil, fmt.Errorf("missing Keychain: litellm-api-key")
-	}
-	if !keychainExists("anthropic-base-url") {
-		return "", nil, nil, fmt.Errorf("missing Keychain: anthropic-base-url")
-	}
-
-	apiKey := keychainGet("litellm-api-key")
-	baseURL := keychainGet("anthropic-base-url")
-
-	// Check for litellm profile
-	out, _ := execCmdOutput("openshell", "provider", "list-profiles")
-	if !strings.Contains(out, "litellm-inference") {
-		repoRoot := findRepoRoot()
-		profilePath := filepath.Join(repoRoot, "openshell", "litellm-inference-profile.yaml")
-		if err := execCmd("openshell", "provider", "profile", "import", "--file", profilePath); err != nil {
-			return "", nil, nil, fmt.Errorf("failed to import LiteLLM provider profile")
+// resolveInferenceEnv merges auto-forwarded host config env vars with explicit
+// --env overrides. Credential vars are excluded — they go through providers.
+// Returns --env flags for openshell sandbox create.
+func resolveInferenceEnv(harness string, explicitEnv []string) []string {
+	explicitKeys := make(map[string]bool)
+	for _, e := range explicitEnv {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			explicitKeys[k] = true
 		}
 	}
 
-	// Get bearer token (optional)
-	bearerToken := ""
-	if keychainExists("litellm-bearer-token") {
-		bearerToken = keychainGet("litellm-bearer-token")
+	// Build set of credential keys to exclude from --env forwarding
+	credentialKeys := make(map[string]bool)
+	for _, key := range inferenceCredentialVars[harness] {
+		credentialKeys[key] = true
 	}
 
-	// Create litellm-inference provider
-	_ = execCmd("openshell", "provider", "delete", "litellm-inference")
-	if err := execCmd("openshell", "provider", "create",
-		"--name", "litellm-inference",
-		"--type", "litellm-inference",
-		"--credential", fmt.Sprintf("litellm_api_key=%s", apiKey),
-		"--credential", fmt.Sprintf("litellm_bearer_token=%s", orDefault(bearerToken, "unused")),
-	); err != nil {
-		return "", nil, nil, fmt.Errorf("failed to create litellm-inference provider")
-	}
-	providers := []string{"litellm-inference"}
-	envFlags := []string{"--provider", "litellm-inference"}
+	var envFlags []string
 
-	// Claude Code also requires builtin claude-code provider
-	if harness == HarnessClaude {
-		_ = execCmd("openshell", "provider", "delete", "claude-code")
+	// Auto-forward config vars from host (unless overridden by --env)
+	for _, key := range inferenceConfigVars[harness] {
+		if explicitKeys[key] {
+			continue
+		}
+		if val := os.Getenv(key); val != "" {
+			envFlags = append(envFlags, "--env", key+"="+val)
+		}
+	}
+
+	// Add explicit --env values, but warn if they look like credentials
+	for _, e := range explicitEnv {
+		k, _, _ := strings.Cut(e, "=")
+		if credentialKeys[k] {
+			fmt.Printf("[agent-run] NOTE: %s will be injected via provider credential (not --env).\n", k)
+			continue
+		}
+		envFlags = append(envFlags, "--env", e)
+	}
+
+	return envFlags
+}
+
+// resolveCredential finds a credential value from explicit --env args or host env.
+func resolveCredential(key string, explicitEnv []string) string {
+	for _, e := range explicitEnv {
+		if k, v, ok := strings.Cut(e, "="); ok && k == key {
+			return v
+		}
+	}
+	return os.Getenv(key)
+}
+
+// createInferenceProviders creates the OpenShell providers needed for the
+// harness to reach its inference endpoint, with credentials injected securely.
+func createInferenceProviders(harness string, explicitEnv []string) (providerFlags []string, providerNames []string, err error) {
+	var flags []string
+	var names []string
+
+	switch harness {
+	case HarnessClaude:
+		name := "claude-code"
+		apiKey := resolveCredential("ANTHROPIC_API_KEY", explicitEnv)
+		if apiKey == "" {
+			apiKey = resolveCredential("CLAUDE_CODE_OAUTH_TOKEN", explicitEnv)
+		}
+		if apiKey == "" {
+			apiKey = resolveCredential("ANTHROPIC_AUTH_TOKEN", explicitEnv)
+		}
+		if apiKey == "" {
+			apiKey = "none"
+		}
+
+		_ = execCmdSilent("openshell", "provider", "delete", name)
 		if err := execCmd("openshell", "provider", "create",
-			"--name", "claude-code",
+			"--name", name,
 			"--type", "claude-code",
 			"--credential", fmt.Sprintf("api_key=%s", apiKey),
 		); err != nil {
-			return "", nil, nil, fmt.Errorf("failed to create claude-code provider")
+			return nil, nil, fmt.Errorf("failed to create claude-code provider: %w", err)
 		}
-		providers = append(providers, "claude-code")
-		envFlags = append(envFlags, "--provider", "claude-code")
-	}
+		flags = append(flags, "--provider", name)
+		names = append(names, name)
 
-	// Environment flags
-	switch harness {
-	case HarnessClaude:
-		envFlags = append(envFlags,
-			"--env", "ANTHROPIC_API_KEY=__LITELLM_PLACEHOLDER__",
-			"--env", fmt.Sprintf("ANTHROPIC_BASE_URL=%s", baseURL),
-			"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-		)
-		if useMax {
-			if bearerToken == "" {
-				return "", nil, nil, fmt.Errorf("missing Keychain: litellm-bearer-token (required for --max)")
-			}
-			envFlags = append(envFlags,
-				"--env", fmt.Sprintf("ANTHROPIC_CUSTOM_HEADERS=x-litellm-api-key: Bearer %s", bearerToken),
-			)
-			fmt.Println("[agent-run]   Max subscription mode enabled.")
-		}
 	case HarnessPi:
-		envFlags = append(envFlags,
-			"--env", fmt.Sprintf("LITELLM_BASE_URL=%s", baseURL),
-		)
+		if err := ensureLiteLLMProvider(); err != nil {
+			return nil, nil, err
+		}
+
+		apiKey := resolveCredential("LITELLM_API_KEY", explicitEnv)
+		if apiKey == "" {
+			return nil, nil, fmt.Errorf("LITELLM_API_KEY is required for Pi harness, set it in your environment or pass --env LITELLM_API_KEY=<key>")
+		}
+
+		name := "litellm-inference"
+		_ = execCmdSilent("openshell", "provider", "delete", name)
+		if err := execCmd("openshell", "provider", "create",
+			"--name", name,
+			"--type", "litellm-inference",
+			"--credential", fmt.Sprintf("litellm_api_key=%s", apiKey),
+			"--credential", "litellm_bearer_token=unused",
+		); err != nil {
+			return nil, nil, fmt.Errorf("failed to create litellm-inference provider: %w", err)
+		}
+		flags = append(flags, "--provider", name)
+		names = append(names, name)
 	}
 
-	return "setup_sandbox_litellm", providers, envFlags, nil
+	return flags, names, nil
 }
 
-func setupProviderVertex(harness string, useMax bool) (string, []string, []string, error) {
-	fmt.Println("[agent-run] Inference provider: vertex")
-
-	if harness != HarnessClaude {
-		return "", nil, nil, fmt.Errorf("vertex AI provider only supports the claude harness")
-	}
-	if useMax {
-		return "", nil, nil, fmt.Errorf("--max is only valid with --provider litellm")
-	}
-
-	// Check gcloud ADC
-	home, _ := os.UserHomeDir()
-	adcPath := filepath.Join(home, ".config/gcloud/application_default_credentials.json")
-	if _, err := os.Stat(adcPath); err != nil {
-		return "", nil, nil, fmt.Errorf("missing gcloud ADC; run: gcloud auth application-default login")
-	}
-
-	// Check keychain
-	if !keychainExists("anthropic-vertex-project-id") {
-		return "", nil, nil, fmt.Errorf("missing Keychain: anthropic-vertex-project-id")
-	}
-
-	projectID := keychainGet("anthropic-vertex-project-id")
-
-	// Create vertex-ai provider
-	_ = execCmd("openshell", "provider", "delete", "vertex-ai")
-	if err := execCmd("openshell", "provider", "create",
-		"--name", "vertex-ai",
-		"--type", "google-vertex-ai",
-		"--from-gcloud-adc",
-	); err != nil {
-		return "", nil, nil, fmt.Errorf("failed to create vertex-ai provider")
-	}
-	providers := []string{"vertex-ai"}
-	envFlags := []string{"--provider", "vertex-ai"}
-
-	// Claude Code still requires builtin provider
-	_ = execCmd("openshell", "provider", "delete", "claude-code")
-	if err := execCmd("openshell", "provider", "create",
-		"--name", "claude-code",
-		"--type", "claude-code",
-		"--credential", "api_key=vertex-managed",
-	); err != nil {
-		return "", nil, nil, fmt.Errorf("failed to create claude-code provider")
-	}
-	providers = append(providers, "claude-code")
-	envFlags = append(envFlags, "--provider", "claude-code")
-
-	// Environment flags
-	envFlags = append(envFlags,
-		"--env", "CLAUDE_CODE_USE_VERTEX=1",
-		"--env", fmt.Sprintf("ANTHROPIC_VERTEX_PROJECT_ID=%s", projectID),
-		"--env", "CLOUD_ML_REGION=global",
-		"--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-	)
-
-	return "setup_sandbox_vertex", providers, envFlags, nil
-}
-
-func setupProviderAPI(harness string, useMax bool) (string, []string, []string, error) {
-	fmt.Println("[agent-run] Inference provider: api (direct Anthropic)")
-
-	if harness != HarnessClaude {
-		return "", nil, nil, fmt.Errorf("direct Anthropic API provider only supports the claude harness")
-	}
-	if useMax {
-		return "", nil, nil, fmt.Errorf("--max is only valid with --provider litellm")
-	}
-
-	// Get API key
-	apiKey := ""
-	if keychainExists("anthropic-api-key-direct") {
-		apiKey = keychainGet("anthropic-api-key-direct")
-		fmt.Println("[agent-run]   Using dedicated direct API key.")
-	} else if keychainExists("litellm-api-key") {
-		apiKey = keychainGet("litellm-api-key")
-		fmt.Println("[agent-run]   Using litellm-api-key (no anthropic-api-key-direct found).")
-	} else {
-		return "", nil, nil, fmt.Errorf("missing Keychain: anthropic-api-key-direct or litellm-api-key")
-	}
-
-	// Create claude-code provider
-	_ = execCmd("openshell", "provider", "delete", "claude-code")
-	if err := execCmd("openshell", "provider", "create",
-		"--name", "claude-code",
-		"--type", "claude-code",
-		"--credential", fmt.Sprintf("api_key=%s", apiKey),
-	); err != nil {
-		return "", nil, nil, fmt.Errorf("failed to create claude-code provider")
-	}
-	providers := []string{"claude-code"}
-	envFlags := []string{"--provider", "claude-code", "--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0"}
-
-	return "setup_sandbox_api", providers, envFlags, nil
-}
-
-// runSandboxInitHook runs a provider-specific sandbox initialization hook.
-func runSandboxInitHook(hook, harness, sandboxName string) error {
-	switch hook {
-	case "setup_sandbox_litellm":
-		return setupSandboxLiteLLM(harness, sandboxName)
-	case "setup_sandbox_vertex":
-		return setupSandboxVertex(harness, sandboxName)
-	case "setup_sandbox_api":
-		return setupSandboxAPI(harness, sandboxName)
-	}
-	return nil
-}
-
-func setupSandboxLiteLLM(harness, sandboxName string) error {
+// runSandboxInitHook runs harness-specific initialization inside the sandbox
+// to map provider-injected credentials to the env vars the harness expects.
+func runSandboxInitHook(harness, sandboxName string) error {
 	switch harness {
 	case HarnessClaude:
+		// Map the claude-code provider credential to the env vars Claude expects.
+		oauthToken := resolveCredential("CLAUDE_CODE_OAUTH_TOKEN", nil)
+		if oauthToken != "" {
+			return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
+				`echo 'export CLAUDE_CODE_OAUTH_TOKEN="$api_key"' >> ~/.bashrc
+				 echo 'export CLAUDE_CODE_OAUTH_TOKEN="$api_key"' >> ~/.profile`)
+		}
 		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
-			`echo 'export ANTHROPIC_API_KEY="$litellm_api_key"' >> ~/.bashrc
-			 echo 'export ANTHROPIC_API_KEY="$litellm_api_key"' >> ~/.profile`)
+			`echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.bashrc
+			 echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.profile`)
+
 	case HarnessPi:
 		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
 			`echo 'export LITELLM_API_KEY="$litellm_api_key"' >> ~/.bashrc
@@ -230,62 +170,16 @@ func setupSandboxLiteLLM(harness, sandboxName string) error {
 	return nil
 }
 
-func setupSandboxVertex(harness, sandboxName string) error {
-	fmt.Println("[agent-run]   Vertex AI credentials managed by gateway token refresh.")
-	return nil
-}
-
-func setupSandboxAPI(harness, sandboxName string) error {
-	return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
-		`echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.bashrc
-		 echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.profile`)
-}
-
-// installHarness installs harness-specific software in the sandbox.
-func installHarness(harness, sandboxName string) error {
-	switch harness {
-	case HarnessPi:
-		fmt.Println("[agent-run] Installing Pi in sandbox...")
-		installCmd := `
-			mkdir -p /sandbox/.npm-global
-			npm config set prefix /sandbox/.npm-global
-			npm install -g @earendil-works/pi-coding-agent
-		`
-		if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", installCmd); err != nil {
-			fmt.Println("[agent-run] WARNING: Pi npm install may have failed.")
-		}
-
-		// Setup PATH
-		pathSetup := `
-			echo 'export PATH="/sandbox/.npm-global/bin:$PATH"' >> ~/.bashrc
-			echo 'export PATH="/sandbox/.npm-global/bin:$PATH"' >> ~/.profile
-		`
-		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", pathSetup)
+// ensureLiteLLMProvider imports the litellm-inference profile if not present.
+func ensureLiteLLMProvider() error {
+	out, _ := execCmdOutput("openshell", "provider", "list-profiles")
+	if strings.Contains(out, "litellm-inference") {
+		return nil
+	}
+	repoRoot := findRepoRoot()
+	profilePath := filepath.Join(repoRoot, "openshell", "litellm-inference-profile.yaml")
+	if err := execCmd("openshell", "provider", "profile", "import", "--file", profilePath); err != nil {
+		return fmt.Errorf("failed to import litellm-inference provider profile: %w", err)
 	}
 	return nil
-}
-
-// keychainGet retrieves a value from macOS Keychain.
-func keychainGet(service string) string {
-	out, _ := execCmdOutput("security", "find-generic-password", "-s", service, "-a", os.Getenv("USER"), "-w")
-	return strings.TrimSpace(out)
-}
-
-// findRepoRoot finds the repository root directory.
-func findRepoRoot() string {
-	// Try to find from script location
-	if wd, err := os.Getwd(); err == nil {
-		if _, err := os.Stat(filepath.Join(wd, "openshell")); err == nil {
-			return wd
-		}
-	}
-	// Fallback
-	return "."
-}
-
-func orDefault(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
 }

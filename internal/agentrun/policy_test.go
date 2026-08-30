@@ -14,7 +14,7 @@ func TestParseRepo(t *testing.T) {
 		wantName  string
 		wantErr   bool
 	}{
-		{"jlaska/agent-sandbox-test", "jlaska", "agent-sandbox-test", false},
+		{"jlaska/agent-sandbox", "jlaska", "agent-sandbox", false},
 		{"jlaska/homelab", "jlaska", "homelab", false},
 		{"org/repo-name", "org", "repo-name", false},
 		{"org/repo.name", "org", "repo.name", false},
@@ -90,7 +90,7 @@ func setupPolicyTemplate(t *testing.T) string {
 func TestGeneratePolicy_SandboxTest(t *testing.T) {
 	repoRoot := setupPolicyTemplate(t)
 
-	result, err := GeneratePolicy("jlaska/agent-sandbox-test", repoRoot)
+	result, err := GeneratePolicy("jlaska/agent-sandbox", repoRoot)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,8 +102,8 @@ func TestGeneratePolicy_SandboxTest(t *testing.T) {
 	}
 	policy := string(content)
 
-	if !strings.Contains(policy, "jlaska/agent-sandbox-test") {
-		t.Error("policy must contain jlaska/agent-sandbox-test")
+	if !strings.Contains(policy, "jlaska/agent-sandbox") {
+		t.Error("policy must contain jlaska/agent-sandbox")
 	}
 	if strings.Contains(policy, "jlaska/homelab") {
 		t.Error("policy must NOT contain jlaska/homelab")
@@ -131,14 +131,14 @@ func TestGeneratePolicy_Homelab(t *testing.T) {
 	if !strings.Contains(policy, "jlaska/homelab") {
 		t.Error("policy must contain jlaska/homelab")
 	}
-	if strings.Contains(policy, "agent-sandbox-test") {
-		t.Error("policy must NOT contain agent-sandbox-test")
+	if strings.Contains(policy, "agent-sandbox") {
+		t.Error("policy must NOT contain agent-sandbox")
 	}
 }
 
 func TestGeneratePolicy_ContainsExpectedRules(t *testing.T) {
 	repoRoot := setupPolicyTemplate(t)
-	result, err := GeneratePolicy("jlaska/agent-sandbox-test", repoRoot)
+	result, err := GeneratePolicy("jlaska/agent-sandbox", repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestGeneratePolicy_MalformedRepo(t *testing.T) {
 
 func TestGeneratePolicy_NoDuplicateRepos(t *testing.T) {
 	repoRoot := setupPolicyTemplate(t)
-	result, err := GeneratePolicy("jlaska/agent-sandbox-test", repoRoot)
+	result, err := GeneratePolicy("jlaska/agent-sandbox", repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,12 +215,12 @@ func TestGeneratePolicy_NoDuplicateRepos(t *testing.T) {
 	}
 	policy := string(content)
 
-	count := strings.Count(policy, "jlaska/agent-sandbox-test")
+	count := strings.Count(policy, "jlaska/agent-sandbox")
 	// Count how many unique path entries reference the repo
 	lines := strings.Split(policy, "\n")
 	repoLines := 0
 	for _, line := range lines {
-		if strings.Contains(line, "jlaska/agent-sandbox-test") {
+		if strings.Contains(line, "jlaska/agent-sandbox") {
 			repoLines++
 		}
 	}
@@ -231,7 +231,7 @@ func TestGeneratePolicy_NoDuplicateRepos(t *testing.T) {
 
 func TestGeneratePolicy_MissingTemplate(t *testing.T) {
 	emptyDir := t.TempDir()
-	_, err := GeneratePolicy("jlaska/agent-sandbox-test", emptyDir)
+	_, err := GeneratePolicy("jlaska/agent-sandbox", emptyDir)
 	if err == nil {
 		t.Error("expected error for missing policy template")
 	}
@@ -239,7 +239,7 @@ func TestGeneratePolicy_MissingTemplate(t *testing.T) {
 
 func TestGeneratePolicy_NoWildcardRepoWrite(t *testing.T) {
 	repoRoot := setupPolicyTemplate(t)
-	result, err := GeneratePolicy("jlaska/agent-sandbox-test", repoRoot)
+	result, err := GeneratePolicy("jlaska/agent-sandbox", repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

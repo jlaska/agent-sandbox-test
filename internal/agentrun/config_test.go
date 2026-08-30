@@ -12,76 +12,66 @@ func TestParseArgs(t *testing.T) {
 		want    *Config
 	}{
 		{
-			name:    "valid claude with litellm",
-			args:    []string{"jlaska/agent-sandbox-test", "claude"},
+			name:    "valid claude",
+			args:    []string{"jlaska/agent-sandbox", "claude"},
 			wantErr: false,
 			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "litellm",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "claude",
 			},
 		},
 		{
-			name:    "valid pi with default provider",
-			args:    []string{"jlaska/agent-sandbox-test", "pi"},
+			name:    "valid pi",
+			args:    []string{"jlaska/agent-sandbox", "pi"},
 			wantErr: false,
 			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "pi",
-				Provider: "litellm",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "pi",
 			},
 		},
 		{
-			name:    "valid shell with explicit none",
-			args:    []string{"jlaska/agent-sandbox-test", "shell", "--provider", "none"},
+			name:    "valid shell",
+			args:    []string{"jlaska/agent-sandbox", "shell"},
 			wantErr: false,
 			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "shell",
-				Provider: "none",
-			},
-		},
-		{
-			name:    "claude with vertex",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--provider", "vertex"},
-			wantErr: false,
-			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "vertex",
-			},
-		},
-		{
-			name:    "claude with api",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--provider", "api"},
-			wantErr: false,
-			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "api",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "shell",
 			},
 		},
 		{
 			name:    "with model override",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--model", "claude-3-opus"},
+			args:    []string{"jlaska/agent-sandbox", "claude", "--model", "claude-3-opus"},
 			wantErr: false,
 			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "litellm",
-				Model:    "claude-3-opus",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "claude",
+				Model:   "claude-3-opus",
 			},
 		},
 		{
-			name:    "with max flag",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--max"},
+			name:    "with env var",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--env", "ANTHROPIC_API_KEY=sk-test"},
 			wantErr: false,
 			want: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "litellm",
-				Max:      true,
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "claude",
+				EnvVars: []string{"ANTHROPIC_API_KEY=sk-test"},
 			},
+		},
+		{
+			name:    "with multiple env vars",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--env", "ANTHROPIC_API_KEY=sk-test", "--env", "ANTHROPIC_BASE_URL=https://example.com"},
+			wantErr: false,
+			want: &Config{
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "claude",
+				EnvVars: []string{"ANTHROPIC_API_KEY=sk-test", "ANTHROPIC_BASE_URL=https://example.com"},
+			},
+		},
+		{
+			name:    "env var without equals",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--env", "INVALID"},
+			wantErr: true,
 		},
 		{
 			name:    "missing repository",
@@ -90,27 +80,7 @@ func TestParseArgs(t *testing.T) {
 		},
 		{
 			name:    "unknown harness",
-			args:    []string{"jlaska/agent-sandbox-test", "unknown"},
-			wantErr: true,
-		},
-		{
-			name:    "unknown provider",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--provider", "unknown"},
-			wantErr: true,
-		},
-		{
-			name:    "incompatible harness/provider",
-			args:    []string{"jlaska/agent-sandbox-test", "pi", "--provider", "vertex"},
-			wantErr: true,
-		},
-		{
-			name:    "unapproved repository",
-			args:    []string{"unknown/repo", "claude"},
-			wantErr: true,
-		},
-		{
-			name:    "max with non-litellm",
-			args:    []string{"jlaska/agent-sandbox-test", "claude", "--provider", "vertex", "--max"},
+			args:    []string{"jlaska/agent-sandbox", "unknown"},
 			wantErr: true,
 		},
 		{
@@ -137,6 +107,37 @@ func TestParseArgs(t *testing.T) {
 				ListRepos: true,
 			},
 		},
+		{
+			name:    "passthrough args after --",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--", "-p", "fix the bug"},
+			wantErr: false,
+			want: &Config{
+				Repo:            "jlaska/agent-sandbox",
+				Harness:         "claude",
+				PassthroughArgs: []string{"-p", "fix the bug"},
+			},
+		},
+		{
+			name:    "passthrough with model and flags",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--model", "opus-4-8", "--", "--verbose", "--allowedTools", "Bash"},
+			wantErr: false,
+			want: &Config{
+				Repo:            "jlaska/agent-sandbox",
+				Harness:         "claude",
+				Model:           "opus-4-8",
+				PassthroughArgs: []string{"--verbose", "--allowedTools", "Bash"},
+			},
+		},
+		{
+			name:    "bare -- with no passthrough",
+			args:    []string{"jlaska/agent-sandbox", "claude", "--"},
+			wantErr: false,
+			want: &Config{
+				Repo:            "jlaska/agent-sandbox",
+				Harness:         "claude",
+				PassthroughArgs: []string{},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,86 +162,30 @@ func TestParseArgs(t *testing.T) {
 			if cfg.Harness != tt.want.Harness {
 				t.Errorf("Harness = %v, want %v", cfg.Harness, tt.want.Harness)
 			}
-			if cfg.Provider != tt.want.Provider {
-				t.Errorf("Provider = %v, want %v", cfg.Provider, tt.want.Provider)
-			}
 			if cfg.Model != tt.want.Model {
 				t.Errorf("Model = %v, want %v", cfg.Model, tt.want.Model)
 			}
-			if cfg.Max != tt.want.Max {
-				t.Errorf("Max = %v, want %v", cfg.Max, tt.want.Max)
+			if tt.want.EnvVars != nil {
+				if len(cfg.EnvVars) != len(tt.want.EnvVars) {
+					t.Errorf("EnvVars length = %d, want %d", len(cfg.EnvVars), len(tt.want.EnvVars))
+				} else {
+					for i, v := range cfg.EnvVars {
+						if v != tt.want.EnvVars[i] {
+							t.Errorf("EnvVars[%d] = %q, want %q", i, v, tt.want.EnvVars[i])
+						}
+					}
+				}
 			}
-		})
-	}
-}
-
-func TestHarnessSupportsProvider(t *testing.T) {
-	tests := []struct {
-		harness  string
-		provider string
-		want     bool
-	}{
-		{HarnessClaude, ProviderLiteLLM, true},
-		{HarnessClaude, ProviderVertex, true},
-		{HarnessClaude, ProviderAPI, true},
-		{HarnessClaude, ProviderNone, false},
-		{HarnessPi, ProviderLiteLLM, true},
-		{HarnessPi, ProviderVertex, false},
-		{HarnessPi, ProviderAPI, false},
-		{HarnessPi, ProviderNone, false},
-		{HarnessShell, ProviderLiteLLM, false},
-		{HarnessShell, ProviderVertex, false},
-		{HarnessShell, ProviderAPI, false},
-		{HarnessShell, ProviderNone, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.harness+"_"+tt.provider, func(t *testing.T) {
-			got := harnessSupportsProvider(tt.harness, tt.provider)
-			if got != tt.want {
-				t.Errorf("harnessSupportsProvider(%v, %v) = %v, want %v", tt.harness, tt.provider, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestHarnessDefaultProvider(t *testing.T) {
-	tests := []struct {
-		harness string
-		want    string
-	}{
-		{HarnessClaude, ProviderLiteLLM},
-		{HarnessPi, ProviderLiteLLM},
-		{HarnessShell, ProviderNone},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.harness, func(t *testing.T) {
-			got := harnessDefaultProvider(tt.harness)
-			if got != tt.want {
-				t.Errorf("harnessDefaultProvider(%v) = %v, want %v", tt.harness, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsApprovedRepo(t *testing.T) {
-	tests := []struct {
-		repo string
-		want bool
-	}{
-		{"jlaska/agent-sandbox-test", true},
-		{"jlaska/homelab", false},
-		{"unknown/repo", false},
-		{"", false},
-		{"jlaska/agent-sandbox-denied", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.repo, func(t *testing.T) {
-			got := isApprovedRepo(tt.repo)
-			if got != tt.want {
-				t.Errorf("isApprovedRepo(%v) = %v, want %v", tt.repo, got, tt.want)
+			if tt.want.PassthroughArgs != nil {
+				if len(cfg.PassthroughArgs) != len(tt.want.PassthroughArgs) {
+					t.Errorf("PassthroughArgs length = %d, want %d", len(cfg.PassthroughArgs), len(tt.want.PassthroughArgs))
+				} else {
+					for i, a := range cfg.PassthroughArgs {
+						if a != tt.want.PassthroughArgs[i] {
+							t.Errorf("PassthroughArgs[%d] = %q, want %q", i, a, tt.want.PassthroughArgs[i])
+						}
+					}
+				}
 			}
 		})
 	}
@@ -259,9 +204,8 @@ func TestValidateMalformedRepos(t *testing.T) {
 	for _, repo := range malformed {
 		t.Run(repo, func(t *testing.T) {
 			cfg := &Config{
-				Repo:     repo,
-				Harness:  "claude",
-				Provider: "litellm",
+				Repo:    repo,
+				Harness: "claude",
 			}
 			err := cfg.Validate()
 			if err == nil {
@@ -280,73 +224,40 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "litellm",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "claude",
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing repo",
 			cfg: &Config{
-				Harness:  "claude",
-				Provider: "litellm",
+				Harness: "claude",
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing harness",
 			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Provider: "litellm",
+				Repo: "jlaska/agent-sandbox",
 			},
 			wantErr: true,
 		},
 		{
 			name: "unknown harness",
 			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "invalid",
-				Provider: "litellm",
+				Repo:    "jlaska/agent-sandbox",
+				Harness: "invalid",
 			},
 			wantErr: true,
 		},
 		{
-			name: "unknown provider",
+			name: "any valid repo accepted",
 			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "invalid",
+				Repo:    "unknown/repo",
+				Harness: "claude",
 			},
-			wantErr: true,
-		},
-		{
-			name: "incompatible provider",
-			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "pi",
-				Provider: "vertex",
-			},
-			wantErr: true,
-		},
-		{
-			name: "unapproved repo",
-			cfg: &Config{
-				Repo:     "unknown/repo",
-				Harness:  "claude",
-				Provider: "litellm",
-			},
-			wantErr: true,
-		},
-		{
-			name: "max with non-litellm",
-			cfg: &Config{
-				Repo:     "jlaska/agent-sandbox-test",
-				Harness:  "claude",
-				Provider: "vertex",
-				Max:      true,
-			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
