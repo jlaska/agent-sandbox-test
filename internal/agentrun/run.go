@@ -149,8 +149,8 @@ func Run(cfg *Config) error {
 	}
 	providersCreated = append(providersCreated, GitHubProviderName)
 
-	// Step 4: Create inference providers (harness-specific)
-	inferenceFlags, inferenceProviders, err := createInferenceProviders(cfg.Harness)
+	// Step 4: Create inference providers (credentials injected securely via provider)
+	inferenceFlags, inferenceProviders, err := createInferenceProviders(cfg.Harness, cfg.EnvVars)
 	if err != nil {
 		return fmt.Errorf("failed to create inference providers: %w", err)
 	}
@@ -197,7 +197,12 @@ func Run(cfg *Config) error {
 		return err
 	}
 
-	// Step 9: Clone repository
+	// Step 9: Map provider credentials to harness env vars
+	if err := runSandboxInitHook(cfg.Harness, sandboxName); err != nil {
+		return fmt.Errorf("sandbox credential setup failed: %w", err)
+	}
+
+	// Step 10: Clone repository
 	fmt.Printf("[agent-run] Cloning %s...\n", cfg.Repo)
 	if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--",
 		"git", "clone", fmt.Sprintf("https://github.com/%s.git", cfg.Repo), "/sandbox/repo"); err != nil {

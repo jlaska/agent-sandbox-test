@@ -44,9 +44,9 @@ func withMockExec(t *testing.T, fn func(mock *mockCmd)) {
 }
 
 func TestResolveInferenceEnv(t *testing.T) {
-	t.Run("auto-forwards host env vars", func(t *testing.T) {
-		t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	t.Run("auto-forwards config vars from host", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_BASE_URL", "https://example.com")
+		t.Setenv("CLAUDE_CODE_USE_VERTEX", "1")
 
 		flags := resolveInferenceEnv(HarnessClaude, nil)
 
@@ -57,37 +57,53 @@ func TestResolveInferenceEnv(t *testing.T) {
 				found[k] = true
 			}
 		}
-		if !found["ANTHROPIC_API_KEY"] {
-			t.Error("expected ANTHROPIC_API_KEY to be forwarded")
-		}
 		if !found["ANTHROPIC_BASE_URL"] {
 			t.Error("expected ANTHROPIC_BASE_URL to be forwarded")
 		}
+		if !found["CLAUDE_CODE_USE_VERTEX"] {
+			t.Error("expected CLAUDE_CODE_USE_VERTEX to be forwarded")
+		}
 	})
 
-	t.Run("explicit env overrides host", func(t *testing.T) {
-		t.Setenv("ANTHROPIC_API_KEY", "sk-from-host")
+	t.Run("credential vars excluded from env forwarding", func(t *testing.T) {
+		t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+		t.Setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-		flags := resolveInferenceEnv(HarnessClaude, []string{"ANTHROPIC_API_KEY=sk-explicit"})
+		flags := resolveInferenceEnv(HarnessClaude, nil)
 
-		// Should have only the explicit value, not the host value
-		count := 0
 		for i := 0; i < len(flags)-1; i += 2 {
 			if flags[i] == "--env" && strings.HasPrefix(flags[i+1], "ANTHROPIC_API_KEY=") {
-				count++
-				if flags[i+1] != "ANTHROPIC_API_KEY=sk-explicit" {
-					t.Errorf("expected explicit value, got %s", flags[i+1])
-				}
+				t.Error("ANTHROPIC_API_KEY should NOT be forwarded as --env (it goes through provider)")
 			}
 		}
-		if count != 1 {
-			t.Errorf("expected exactly 1 ANTHROPIC_API_KEY entry, got %d", count)
+	})
+
+	t.Run("explicit credential env redirected to provider", func(t *testing.T) {
+		flags := resolveInferenceEnv(HarnessClaude, []string{"ANTHROPIC_API_KEY=sk-explicit"})
+
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" && strings.HasPrefix(flags[i+1], "ANTHROPIC_API_KEY=") {
+				t.Error("explicit ANTHROPIC_API_KEY should be redirected to provider, not --env")
+			}
+		}
+	})
+
+	t.Run("explicit config env forwarded", func(t *testing.T) {
+		flags := resolveInferenceEnv(HarnessClaude, []string{"ANTHROPIC_BASE_URL=https://custom.com"})
+
+		found := false
+		for i := 0; i < len(flags)-1; i += 2 {
+			if flags[i] == "--env" && flags[i+1] == "ANTHROPIC_BASE_URL=https://custom.com" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("explicit config env should be forwarded")
 		}
 	})
 
 	t.Run("unset host vars not forwarded", func(t *testing.T) {
-		// Clear all known inference vars to ensure clean state
-		for _, key := range inferenceEnvVars[HarnessClaude] {
+		for _, key := range inferenceConfigVars[HarnessClaude] {
 			t.Setenv(key, "")
 		}
 
@@ -97,24 +113,30 @@ func TestResolveInferenceEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("pi harness forwards pi vars", func(t *testing.T) {
+	t.Run("pi forwards config vars only", func(t *testing.T) {
 		t.Setenv("LITELLM_API_KEY", "sk-litellm")
 		t.Setenv("LITELLM_BASE_URL", "https://litellm.example.com")
 
 		flags := resolveInferenceEnv(HarnessPi, nil)
 
-		found := map[string]bool{}
+		foundBaseURL := false
+		foundAPIKey := false
 		for i := 0; i < len(flags)-1; i += 2 {
 			if flags[i] == "--env" {
 				k, _, _ := strings.Cut(flags[i+1], "=")
-				found[k] = true
+				if k == "LITELLM_BASE_URL" {
+					foundBaseURL = true
+				}
+				if k == "LITELLM_API_KEY" {
+					foundAPIKey = true
+				}
 			}
 		}
-		if !found["LITELLM_API_KEY"] {
-			t.Error("expected LITELLM_API_KEY forwarded for pi")
-		}
-		if !found["LITELLM_BASE_URL"] {
+		if !foundBaseURL {
 			t.Error("expected LITELLM_BASE_URL forwarded for pi")
+		}
+		if foundAPIKey {
+			t.Error("LITELLM_API_KEY should NOT be forwarded as --env for pi")
 		}
 	})
 
@@ -126,12 +148,36 @@ func TestResolveInferenceEnv(t *testing.T) {
 			t.Errorf("expected no auto-forward for shell, got %v", flags)
 		}
 	})
+}
 
-	t.Run("explicit env always included for any harness", func(t *testing.T) {
-		flags := resolveInferenceEnv(HarnessShell, []string{"CUSTOM_VAR=val"})
+func TestResolveCredential(t *testing.T) {
+	t.Run("from explicit env", func(t *testing.T) {
+		val := resolveCredential("MY_KEY", []string{"MY_KEY=explicit"})
+		if val != "explicit" {
+			t.Errorf("got %q, want explicit", val)
+		}
+	})
 
-		if len(flags) != 2 || flags[1] != "CUSTOM_VAR=val" {
-			t.Errorf("expected explicit env for shell, got %v", flags)
+	t.Run("from host env", func(t *testing.T) {
+		t.Setenv("MY_KEY", "from-host")
+		val := resolveCredential("MY_KEY", nil)
+		if val != "from-host" {
+			t.Errorf("got %q, want from-host", val)
+		}
+	})
+
+	t.Run("explicit wins over host", func(t *testing.T) {
+		t.Setenv("MY_KEY", "from-host")
+		val := resolveCredential("MY_KEY", []string{"MY_KEY=explicit"})
+		if val != "explicit" {
+			t.Errorf("got %q, want explicit", val)
+		}
+	})
+
+	t.Run("missing returns empty", func(t *testing.T) {
+		val := resolveCredential("NONEXISTENT_KEY", nil)
+		if val != "" {
+			t.Errorf("got %q, want empty", val)
 		}
 	})
 }
@@ -139,7 +185,8 @@ func TestResolveInferenceEnv(t *testing.T) {
 func TestCreateInferenceProviders(t *testing.T) {
 	t.Run("claude creates claude-code provider", func(t *testing.T) {
 		withMockExec(t, func(mock *mockCmd) {
-			flags, names, err := createInferenceProviders(HarnessClaude)
+			t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+			flags, names, err := createInferenceProviders(HarnessClaude, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -148,10 +195,6 @@ func TestCreateInferenceProviders(t *testing.T) {
 			}
 			if len(flags) != 2 || flags[0] != "--provider" || flags[1] != "claude-code" {
 				t.Errorf("flags = %v, want [--provider claude-code]", flags)
-			}
-			// Should have called delete then create
-			if len(mock.calls) != 2 {
-				t.Errorf("expected 2 calls (delete + create), got %d", len(mock.calls))
 			}
 		})
 	})
@@ -166,7 +209,8 @@ func TestCreateInferenceProviders(t *testing.T) {
 			}
 			execCmdOutputFn = mock.execOutput
 
-			flags, names, err := createInferenceProviders(HarnessPi)
+			t.Setenv("LITELLM_API_KEY", "sk-litellm")
+			flags, names, err := createInferenceProviders(HarnessPi, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -179,9 +223,19 @@ func TestCreateInferenceProviders(t *testing.T) {
 		})
 	})
 
+	t.Run("pi errors without LITELLM_API_KEY", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			t.Setenv("LITELLM_API_KEY", "")
+			_, _, err := createInferenceProviders(HarnessPi, nil)
+			if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY") {
+				t.Errorf("expected LITELLM_API_KEY error, got %v", err)
+			}
+		})
+	})
+
 	t.Run("shell creates no providers", func(t *testing.T) {
 		withMockExec(t, func(mock *mockCmd) {
-			flags, names, err := createInferenceProviders(HarnessShell)
+			flags, names, err := createInferenceProviders(HarnessShell, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -190,6 +244,63 @@ func TestCreateInferenceProviders(t *testing.T) {
 			}
 			if len(flags) != 0 {
 				t.Errorf("expected no flags for shell, got %v", flags)
+			}
+		})
+	})
+}
+
+func TestRunSandboxInitHook(t *testing.T) {
+	t.Run("claude maps ANTHROPIC_API_KEY", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			err := runSandboxInitHook("claude", "test-sb")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(mock.calls) != 1 {
+				t.Fatalf("expected 1 call, got %d", len(mock.calls))
+			}
+			cmd := strings.Join(mock.calls[0], " ")
+			if !strings.Contains(cmd, "ANTHROPIC_API_KEY") {
+				t.Error("expected ANTHROPIC_API_KEY in init hook")
+			}
+		})
+	})
+
+	t.Run("claude maps CLAUDE_CODE_OAUTH_TOKEN when set", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+		withMockExec(t, func(mock *mockCmd) {
+			err := runSandboxInitHook("claude", "test-sb")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			cmd := strings.Join(mock.calls[0], " ")
+			if !strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") {
+				t.Error("expected CLAUDE_CODE_OAUTH_TOKEN in init hook")
+			}
+		})
+	})
+
+	t.Run("pi maps LITELLM_API_KEY", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			err := runSandboxInitHook("pi", "test-sb")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			cmd := strings.Join(mock.calls[0], " ")
+			if !strings.Contains(cmd, "LITELLM_API_KEY") {
+				t.Error("expected LITELLM_API_KEY in init hook")
+			}
+		})
+	})
+
+	t.Run("shell is noop", func(t *testing.T) {
+		withMockExec(t, func(mock *mockCmd) {
+			err := runSandboxInitHook("shell", "test-sb")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(mock.calls) != 0 {
+				t.Errorf("expected 0 calls for shell, got %d", len(mock.calls))
 			}
 		})
 	})

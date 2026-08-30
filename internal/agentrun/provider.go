@@ -7,17 +7,23 @@ import (
 	"strings"
 )
 
-// placeholderCredential is a non-secret value used when creating OpenShell
-// providers that need a credential field but don't use it for auth.
-const placeholderCredential = "api_key=not-a-real-key" //nolint:gosec // gitleaks:allow
-
 // Known inference env vars to auto-forward from the host environment.
-var inferenceEnvVars = map[string][]string{
+// Split into credentials (injected via OpenShell provider, secure) and
+// config (injected via --env, visible to the agent).
+var inferenceCredentialVars = map[string][]string{
 	HarnessClaude: {
 		"ANTHROPIC_API_KEY",
-		"ANTHROPIC_BASE_URL",
 		"ANTHROPIC_AUTH_TOKEN",
 		"CLAUDE_CODE_OAUTH_TOKEN",
+	},
+	HarnessPi: {
+		"LITELLM_API_KEY",
+	},
+}
+
+var inferenceConfigVars = map[string][]string{
+	HarnessClaude: {
+		"ANTHROPIC_BASE_URL",
 		"CLAUDE_CODE_USE_VERTEX",
 		"ANTHROPIC_VERTEX_PROJECT_ID",
 		"CLOUD_ML_REGION",
@@ -25,17 +31,15 @@ var inferenceEnvVars = map[string][]string{
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 	},
 	HarnessPi: {
-		"LITELLM_API_KEY",
 		"LITELLM_BASE_URL",
-		"ANTHROPIC_API_KEY",
 		"ANTHROPIC_BASE_URL",
 	},
 }
 
-// resolveInferenceEnv merges auto-forwarded host env vars with explicit --env
-// overrides. Returns --env flags for openshell sandbox create.
+// resolveInferenceEnv merges auto-forwarded host config env vars with explicit
+// --env overrides. Credential vars are excluded — they go through providers.
+// Returns --env flags for openshell sandbox create.
 func resolveInferenceEnv(harness string, explicitEnv []string) []string {
-	// Collect explicit keys for override detection
 	explicitKeys := make(map[string]bool)
 	for _, e := range explicitEnv {
 		if k, _, ok := strings.Cut(e, "="); ok {
@@ -43,10 +47,16 @@ func resolveInferenceEnv(harness string, explicitEnv []string) []string {
 		}
 	}
 
+	// Build set of credential keys to exclude from --env forwarding
+	credentialKeys := make(map[string]bool)
+	for _, key := range inferenceCredentialVars[harness] {
+		credentialKeys[key] = true
+	}
+
 	var envFlags []string
 
-	// Auto-forward known env vars from host (unless overridden by --env)
-	for _, key := range inferenceEnvVars[harness] {
+	// Auto-forward config vars from host (unless overridden by --env)
+	for _, key := range inferenceConfigVars[harness] {
 		if explicitKeys[key] {
 			continue
 		}
@@ -55,30 +65,54 @@ func resolveInferenceEnv(harness string, explicitEnv []string) []string {
 		}
 	}
 
-	// Add explicit --env values
+	// Add explicit --env values, but warn if they look like credentials
 	for _, e := range explicitEnv {
+		k, _, _ := strings.Cut(e, "=")
+		if credentialKeys[k] {
+			fmt.Printf("[agent-run] NOTE: %s will be injected via provider credential (not --env).\n", k)
+			continue
+		}
 		envFlags = append(envFlags, "--env", e)
 	}
 
 	return envFlags
 }
 
+// resolveCredential finds a credential value from explicit --env args or host env.
+func resolveCredential(key string, explicitEnv []string) string {
+	for _, e := range explicitEnv {
+		if k, v, ok := strings.Cut(e, "="); ok && k == key {
+			return v
+		}
+	}
+	return os.Getenv(key)
+}
+
 // createInferenceProviders creates the OpenShell providers needed for the
-// harness to reach its inference endpoint. Returns provider flags for sandbox
-// creation and provider names for cleanup tracking.
-func createInferenceProviders(harness string) (providerFlags []string, providerNames []string, err error) {
+// harness to reach its inference endpoint, with credentials injected securely.
+func createInferenceProviders(harness string, explicitEnv []string) (providerFlags []string, providerNames []string, err error) {
 	var flags []string
 	var names []string
 
 	switch harness {
 	case HarnessClaude:
-		// Claude Code requires the built-in claude-code provider type.
 		name := "claude-code"
+		apiKey := resolveCredential("ANTHROPIC_API_KEY", explicitEnv)
+		if apiKey == "" {
+			apiKey = resolveCredential("CLAUDE_CODE_OAUTH_TOKEN", explicitEnv)
+		}
+		if apiKey == "" {
+			apiKey = resolveCredential("ANTHROPIC_AUTH_TOKEN", explicitEnv)
+		}
+		if apiKey == "" {
+			apiKey = "none"
+		}
+
 		_ = execCmdSilent("openshell", "provider", "delete", name)
 		if err := execCmd("openshell", "provider", "create",
 			"--name", name,
 			"--type", "claude-code",
-			"--credential", placeholderCredential,
+			"--credential", fmt.Sprintf("api_key=%s", apiKey),
 		); err != nil {
 			return nil, nil, fmt.Errorf("failed to create claude-code provider: %w", err)
 		}
@@ -86,17 +120,22 @@ func createInferenceProviders(harness string) (providerFlags []string, providerN
 		names = append(names, name)
 
 	case HarnessPi:
-		// Pi needs the litellm-inference provider for network access.
 		if err := ensureLiteLLMProvider(); err != nil {
 			return nil, nil, err
 		}
+
+		apiKey := resolveCredential("LITELLM_API_KEY", explicitEnv)
+		if apiKey == "" {
+			return nil, nil, fmt.Errorf("LITELLM_API_KEY is required for Pi harness, set it in your environment or pass --env LITELLM_API_KEY=<key>")
+		}
+
 		name := "litellm-inference"
 		_ = execCmdSilent("openshell", "provider", "delete", name)
 		if err := execCmd("openshell", "provider", "create",
 			"--name", name,
 			"--type", "litellm-inference",
-			"--credential", "litellm_api_key=placeholder", //nolint:gosec // gitleaks:allow
-			"--credential", "litellm_bearer_token=placeholder", //nolint:gosec // gitleaks:allow
+			"--credential", fmt.Sprintf("litellm_api_key=%s", apiKey),
+			"--credential", "litellm_bearer_token=unused",
 		); err != nil {
 			return nil, nil, fmt.Errorf("failed to create litellm-inference provider: %w", err)
 		}
@@ -105,6 +144,30 @@ func createInferenceProviders(harness string) (providerFlags []string, providerN
 	}
 
 	return flags, names, nil
+}
+
+// runSandboxInitHook runs harness-specific initialization inside the sandbox
+// to map provider-injected credentials to the env vars the harness expects.
+func runSandboxInitHook(harness, sandboxName string) error {
+	switch harness {
+	case HarnessClaude:
+		// Map the claude-code provider credential to the env vars Claude expects.
+		oauthToken := resolveCredential("CLAUDE_CODE_OAUTH_TOKEN", nil)
+		if oauthToken != "" {
+			return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
+				`echo 'export CLAUDE_CODE_OAUTH_TOKEN="$api_key"' >> ~/.bashrc
+				 echo 'export CLAUDE_CODE_OAUTH_TOKEN="$api_key"' >> ~/.profile`)
+		}
+		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
+			`echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.bashrc
+			 echo 'export ANTHROPIC_API_KEY="$api_key"' >> ~/.profile`)
+
+	case HarnessPi:
+		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
+			`echo 'export LITELLM_API_KEY="$litellm_api_key"' >> ~/.bashrc
+			 echo 'export LITELLM_API_KEY="$litellm_api_key"' >> ~/.profile`)
+	}
+	return nil
 }
 
 // ensureLiteLLMProvider imports the litellm-inference profile if not present.
