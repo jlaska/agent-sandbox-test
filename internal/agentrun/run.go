@@ -392,7 +392,17 @@ func installHarness(harness, sandboxName string) error {
 			echo 'export PATH="/sandbox/.npm-global/bin:$PATH"' >> ~/.bashrc
 			echo 'export PATH="/sandbox/.npm-global/bin:$PATH"' >> ~/.profile
 		`
-		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", pathSetup)
+		if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", pathSetup); err != nil {
+			return err
+		}
+
+		// Install LiteLLM provider extension via Pi's extension system
+		fmt.Println("[agent-run] Installing pi-provider-litellm extension...")
+		installExt := `export PATH="/sandbox/.npm-global/bin:$PATH" && pi install npm:pi-provider-litellm`
+		if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", installExt); err != nil {
+			fmt.Println("[agent-run] WARNING: pi-provider-litellm install may have failed.")
+		}
+		return nil
 	}
 	return nil
 }
