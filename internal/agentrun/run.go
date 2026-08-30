@@ -197,9 +197,12 @@ func Run(cfg *Config) error {
 		return err
 	}
 
-	// Step 9: Map provider credentials to harness env vars
+	// Step 9: Map provider credentials to harness env vars + pre-seed config
 	if err := runSandboxInitHook(cfg.Harness, sandboxName); err != nil {
 		return fmt.Errorf("sandbox credential setup failed: %w", err)
+	}
+	if err := preseedHarnessConfig(cfg.Harness, sandboxName); err != nil {
+		return fmt.Errorf("harness config setup failed: %w", err)
 	}
 
 	// Step 10: Clone repository
@@ -372,6 +375,19 @@ func printDiagnostics() error {
 // keychainExists checks if a keychain entry exists (macOS only).
 func keychainExists(service string) bool {
 	return execCmdSilent("security", "find-generic-password", "-s", service, "-a", os.Getenv("USER")) == nil
+}
+
+// preseedHarnessConfig creates config files so interactive harnesses
+// skip first-run onboarding wizards inside the sandbox.
+func preseedHarnessConfig(harness, sandboxName string) error {
+	switch harness {
+	case HarnessClaude:
+		// Claude Code checks ~/.claude.json for hasCompletedOnboarding.
+		// Without it, every sandbox launch triggers the first-run wizard.
+		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
+			`mkdir -p ~/.claude && echo '{"hasCompletedOnboarding":true}' > ~/.claude.json`)
+	}
+	return nil
 }
 
 // installHarness installs harness-specific software in the sandbox.
