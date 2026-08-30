@@ -205,14 +205,21 @@ func Run(cfg *Config) error {
 		return fmt.Errorf("harness config setup failed: %w", err)
 	}
 
-	// Step 10: Clone repository
+	// Step 10: Configure global git credential helper (must happen before clone for private repos)
+	fmt.Println("[agent-run] Configuring Git credentials...")
+	credHelper := `git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${api_token:-$GH_TOKEN}"; }; f'`
+	if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", credHelper); err != nil {
+		return fmt.Errorf("git credential setup failed: %w", err)
+	}
+
+	// Step 11: Clone repository
 	fmt.Printf("[agent-run] Cloning %s...\n", cfg.Repo)
 	if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--",
 		"git", "clone", fmt.Sprintf("https://github.com/%s.git", cfg.Repo), "/sandbox/repo"); err != nil {
 		return fmt.Errorf("clone failed: %w", err)
 	}
 
-	// Step 10: Configure Git identity
+	// Step 12: Configure Git identity
 	fmt.Println("[agent-run] Configuring Git identity...")
 	gitConfig := fmt.Sprintf(`
 		cd /sandbox/repo
@@ -220,7 +227,6 @@ func Run(cfg *Config) error {
 		git config user.email '%s'
 		git config commit.gpgsign false
 		git config tag.gpgsign false
-		git config credential.helper '!f() { echo "username=x-access-token"; echo "password=${api_token}"; }; f'
 	`, GitUser, GitEmail)
 	if err := execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c", gitConfig); err != nil {
 		return fmt.Errorf("git configuration failed: %w", err)
