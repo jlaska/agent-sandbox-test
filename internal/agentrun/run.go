@@ -388,10 +388,21 @@ func keychainExists(service string) bool {
 func preseedHarnessConfig(harness, sandboxName string) error {
 	switch harness {
 	case HarnessClaude:
-		// Claude Code checks ~/.claude.json for hasCompletedOnboarding.
-		// Without it, every sandbox launch triggers the first-run wizard.
+		// Claude Code checks ~/.claude.json for hasCompletedOnboarding and
+		// per-project hasTrustDialogAccepted. Without these, every sandbox
+		// launch triggers interactive onboarding/trust prompts.
 		return execCmd("openshell", "sandbox", "exec", "-n", sandboxName, "--", "sh", "-c",
-			`mkdir -p ~/.claude && echo '{"hasCompletedOnboarding":true}' > ~/.claude.json`)
+			`mkdir -p ~/.claude && cat > ~/.claude.json << 'PRESEED'
+{
+  "hasCompletedOnboarding": true,
+  "projects": {
+    "/sandbox/repo": {
+      "hasTrustDialogAccepted": true,
+      "hasCompletedProjectOnboarding": true
+    }
+  }
+}
+PRESEED`)
 	}
 	return nil
 }
